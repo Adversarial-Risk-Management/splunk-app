@@ -1,0 +1,238 @@
+<!--
+  Alert form for the `adversarial_risk` alert action.
+
+  Splunk shows this form under "Add Actions" when a user builds an alert. Each
+  input name maps to a parameter that the script reads:
+  action.adversarial_risk.param.<name>
+
+  Use this action for a standing condition. A posture search that aggregates to
+  one row gives one risk for the whole condition. For an event that needs a
+  responder now, use the "Create Adversarial incident" action.
+-->
+<form class="form-horizontal form-complex">
+    <div class="control-group">
+        <label class="control-label" for="adversarial_risk_title">Title</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_risk.param.title" id="adversarial_risk_title" />
+            <span class="help-block">
+                The risk title. The field accepts alert tokens, for example
+                <code>$name$</code> for the alert name or <code>$result.hosts$</code>
+                for a field of the first result. The title is a key input of
+                AI Suggest Score.
+                <a href="{{SPLUNKWEB_URL_PREFIX}}/help?location=learnmore.alert.action.tokens"
+                   target="_blank" title="Splunk help">Learn more <i class="icon-external"></i></a>
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label" for="adversarial_risk_description">Description</label>
+        <div class="controls">
+            <textarea name="action.adversarial_risk.param.description"
+                      id="adversarial_risk_description" style="height: 110px;"></textarea>
+            <span class="help-block">
+                Optional text for the top of the description. The action always adds
+                the alert name, the trigger time and a link to the search results.
+                The platform reads the description in AI Suggest Score, so name
+                the affected assets and the exposure.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Type</label>
+        <div class="controls">
+            <select name="action.adversarial_risk.param.type">
+                <option value="Control Deficiency">Control Deficiency</option>
+                <option value="Configuration">Configuration</option>
+                <option value="Vulnerability">Vulnerability</option>
+                <option value="Code">Code</option>
+                <option value="Procedural">Procedural</option>
+                <option value="Policy">Policy</option>
+                <option value="Third-party">Third-party</option>
+            </select>
+            <span class="help-block">
+                The category of the risk. A missing safeguard is a control
+                deficiency. A wrong setting is a configuration risk. A known
+                defect in third-party software is a vulnerability.
+            </span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label" for="adversarial_risk_source">Source</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_risk.param.source"
+                   id="adversarial_risk_source" placeholder="Attack Surface Monitoring" />
+            <span class="help-block">
+                Where the risk came from. The name must exist in your organization.
+                The risk sources and the incident sources are separate lists. To see
+                the risk sources, open Settings &gt; Risks in the Adversarial platform.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Status</label>
+        <div class="controls">
+            <select name="action.adversarial_risk.param.status">
+                <option value="New">New</option>
+                <option value="Urgency Proposed">Urgency Proposed</option>
+                <option value="Remediation">Remediation</option>
+            </select>
+            <span class="help-block">The status of the new risk.</span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label">Initially reported urgency</label>
+        <div class="controls">
+            <select name="action.adversarial_risk.param.iru">
+                <option value="">Do not set</option>
+                <option value="auto">From the alert severity</option>
+                <option value="Critical">Critical</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+                <option value="Info">Info</option>
+            </select>
+            <span class="help-block">
+                The raw score of the reporting source, which is the inherent risk.
+                "From the alert severity" maps the Splunk severity of this alert:
+                debug and info give Info, warn gives Low, error gives Medium,
+                severe gives High, and fatal gives Critical. AI Suggest Score
+                reads this field when the title and the description hold too
+                little detail.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <!--
+      The likelihood and the impact give the urgency, and the urgency gives the
+      due date. Both fields stay empty for AI Suggest Score, which reads the
+      title, the description and the comments.
+    -->
+    <div class="control-group">
+        <label class="control-label">Likelihood</label>
+        <div class="controls">
+            <select name="action.adversarial_risk.param.likelihood">
+                <option value="">Leave empty for AI Suggest Score</option>
+                <option value="Imminent">Imminent (highest)</option>
+                <option value="Probable">Probable</option>
+                <option value="Possible">Possible</option>
+                <option value="Unlikely">Unlikely</option>
+                <option value="Remote">Remote (lowest)</option>
+            </select>
+            <span class="help-block">
+                How likely the risk is to cause a threat objective to happen.
+            </span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label">Impact</label>
+        <div class="controls">
+            <select name="action.adversarial_risk.param.impact">
+                <option value="">Leave empty for AI Suggest Score</option>
+                <option value="Severe">Severe (highest)</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+                <option value="Very Low">Very Low (lowest)</option>
+            </select>
+            <span class="help-block">
+                What the risk can cause if an attacker uses it. The platform
+                derives the urgency from the likelihood and the impact, and the
+                due date from the urgency.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label" for="adversarial_risk_likelihood_reason">Likelihood reason</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_risk.param.likelihood_reason"
+                   id="adversarial_risk_likelihood_reason" placeholder="Optional" />
+            <span class="help-block">Why this likelihood applies.</span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label" for="adversarial_risk_impact_reason">Impact reason</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_risk.param.impact_reason"
+                   id="adversarial_risk_impact_reason" placeholder="Optional" />
+            <span class="help-block">Why this impact applies.</span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label" for="adversarial_risk_remediation">Remediation task</label>
+        <div class="controls">
+            <textarea name="action.adversarial_risk.param.remediation_task"
+                      id="adversarial_risk_remediation" style="height: 70px;"></textarea>
+            <span class="help-block">
+                The actions that address the risk. The audience is the wider
+                organization, so be specific.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label" for="adversarial_risk_control">Control statement</label>
+        <div class="controls">
+            <textarea name="action.adversarial_risk.param.control_statement"
+                      id="adversarial_risk_control" style="height: 70px;"></textarea>
+            <span class="help-block">
+                The controls that are in place against the risk. Complete this
+                field before the risk moves to Closed.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label" for="adversarial_risk_fields">Fields</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_risk.param.fields"
+                   id="adversarial_risk_fields" placeholder="host,source,sourcetype" />
+            <span class="help-block">
+                Fields from the first search result to add to the description.
+                Use a comma-separated list. A name can hold a wildcard, for example
+                <code>host_*</code>.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Splunk link</label>
+        <div class="controls">
+            <select name="action.adversarial_risk.param.add_comment">
+                <option value="1">Add a comment with the results link</option>
+                <option value="0">Do not add a comment</option>
+            </select>
+            <span class="help-block">
+                A comment gives the owner a direct link back to the Splunk results.
+                AI Suggest Score reads the comments of a risk.
+            </span>
+        </div>
+    </div>
+
+    <!--
+      The action does not set the due date, the expected date or the threat
+      objectives. The platform derives the due date from the urgency SLA, and
+      AI Suggest Score assigns the threat objectives.
+
+      The API URL and the service account come from the setup page. To change
+      them for one alert, set `param.base_url` in alert_actions.conf. The
+      client secret always stays in the Splunk secret store.
+    -->
+</form>

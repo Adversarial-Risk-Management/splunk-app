@@ -1,0 +1,126 @@
+<!--
+  Alert form for the `adversarial_incident` alert action.
+
+  Splunk shows this form under "Add Actions" when a user builds an alert. Each
+  input name maps to a parameter that the script reads:
+  action.adversarial_incident.param.<name>
+-->
+<form class="form-horizontal form-complex">
+    <div class="control-group">
+        <label class="control-label" for="adversarial_title">Title</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_incident.param.title" id="adversarial_title" />
+            <span class="help-block">
+                The incident title. The field accepts alert tokens, for example
+                <code>$name$</code> for the alert name or <code>$result.host$</code>
+                for a field of the first result.
+                <a href="{{SPLUNKWEB_URL_PREFIX}}/help?location=learnmore.alert.action.tokens"
+                   target="_blank" title="Splunk help">Learn more <i class="icon-external"></i></a>
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label" for="adversarial_description">Description</label>
+        <div class="controls">
+            <textarea name="action.adversarial_incident.param.description"
+                      id="adversarial_description" style="height: 110px;"></textarea>
+            <span class="help-block">
+                Optional text for the top of the description. The action always adds
+                the alert name, the trigger time and a link to the search results.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Severity</label>
+        <div class="controls">
+            <select name="action.adversarial_incident.param.severity">
+                <option value="">Leave empty for AI Suggest Score</option>
+                <option value="auto">From the alert severity</option>
+                <option value="SEV-1">SEV-1 (highest)</option>
+                <option value="SEV-2">SEV-2</option>
+                <option value="SEV-3">SEV-3</option>
+                <option value="SEV-4">SEV-4</option>
+                <option value="SEV-5">SEV-5 (lowest)</option>
+            </select>
+            <span class="help-block">
+                An empty severity lets the platform score the incident from the
+                title, the description and the comments.
+                "From the alert severity" maps the Splunk severity of this alert:
+                debug and info give SEV-5, warn gives SEV-4, error gives SEV-3,
+                severe gives SEV-2, and fatal gives SEV-1.
+            </span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label" for="adversarial_reasoning">Severity reason</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_incident.param.severity_reasoning"
+                   id="adversarial_reasoning" placeholder="Optional" />
+            <span class="help-block">Why this severity applies. The platform shows it next to the score.</span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Status</label>
+        <div class="controls">
+            <select name="action.adversarial_incident.param.status">
+                <option value="New">New</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Review">Review</option>
+            </select>
+            <span class="help-block">The status of the new incident.</span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label" for="adversarial_source">Source</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_incident.param.source" id="adversarial_source" />
+            <span class="help-block">
+                Where the incident came from, for example <code>SIEM</code>. The name must
+                exist in your organization. To see the list, open
+                Settings &gt; Incidents in the Adversarial platform.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label" for="adversarial_fields">Fields</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_incident.param.fields"
+                   id="adversarial_fields" placeholder="host,source,sourcetype" />
+            <span class="help-block">
+                Fields from the first search result to add to the description.
+                Use a comma-separated list. A name can hold a wildcard, for example
+                <code>src_*</code>.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Splunk link</label>
+        <div class="controls">
+            <select name="action.adversarial_incident.param.add_comment">
+                <option value="1">Add a comment with the results link</option>
+                <option value="0">Do not add a comment</option>
+            </select>
+            <span class="help-block">
+                A comment gives the responder a direct link back to the Splunk results.
+            </span>
+        </div>
+    </div>
+
+    <!--
+      The API URL and the service account come from the setup page. To change
+      them for one alert, set `param.base_url` in alert_actions.conf. The
+      client secret always stays in the Splunk secret store.
+    -->
+</form>
