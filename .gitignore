@@ -1,0 +1,14 @@
+# Credentials. The demo writes the service account values here.
+.env
+
+# Build output.
+dist/
+
+# Python.
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# macOS.
+.DS_Store

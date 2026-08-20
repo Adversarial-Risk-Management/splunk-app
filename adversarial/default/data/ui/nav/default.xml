@@ -1,0 +1,4 @@
+<!-- The app holds one page: the setup page. -->
+<nav>
+    <view name="adversarial_setup" default="true" />
+</nav>

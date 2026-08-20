@@ -1,0 +1,105 @@
+<!--
+  Setup page for the Adversarial app.
+
+  The page writes the API URL and the service account credentials into the
+  Splunk secret store. The script adversarial_setup.js does the work through
+  the Splunk management API.
+
+  Keep version="1.1". A SimpleXML dashboard with version="1.0" starts a
+  migration step in Splunk 10, and the page then does not open.
+-->
+<dashboard version="1.1" script="adversarial_setup.js" stylesheet="adversarial_setup.css" hideEdit="true" hideFilters="true">
+    <label>Adversarial Setup</label>
+    <row>
+        <panel>
+            <html>
+                <div class="adversarial-setup">
+                    <h2>Connect Splunk to Adversarial</h2>
+                    <p>
+                        A Splunk alert creates an incident or a risk in Adversarial. The app adds
+                        one alert action for each record type:
+                    </p>
+                    <ul>
+                        <li>
+                            <b>Create Adversarial incident</b> for an event. Something happened,
+                            and somebody must respond.
+                        </li>
+                        <li>
+                            <b>Create Adversarial risk</b> for a standing condition. Something is
+                            weak, and somebody must remediate it.
+                        </li>
+                    </ul>
+                    <p>
+                        Both actions use the same <b>credential service account</b>. To create one,
+                        open the Adversarial platform, go to
+                        <b>Settings &gt; Team &gt; Service Accounts</b>, and click <b>Create</b>.
+                        Give it the roles that it needs: <b>Incident Editor</b> to create
+                        incidents, <b>Risk Editor</b> to create risks, or both roles to use both
+                        actions. The <b>Editor</b> role holds both. Copy the client ID and the
+                        client secret before you close the dialog.
+                    </p>
+
+                    <div id="adversarial-status" class="adversarial-status"></div>
+
+                    <div class="adversarial-field">
+                        <label for="adversarial-base-url">API URL</label>
+                        <input type="text" id="adversarial-base-url" spellcheck="false"
+                               placeholder="https://api.adversarial.com/api" />
+                        <span class="adversarial-help">
+                            The base URL of the API. Keep the <code>/api</code> path element.
+                        </span>
+                    </div>
+
+                    <div class="adversarial-field">
+                        <label for="adversarial-client-id">Client ID</label>
+                        <input type="text" id="adversarial-client-id" spellcheck="false"
+                               placeholder="arm_sa_..." />
+                    </div>
+
+                    <div class="adversarial-field">
+                        <label for="adversarial-client-secret">Client secret</label>
+                        <input type="password" id="adversarial-client-secret" spellcheck="false"
+                               placeholder="arm_sk_..." autocomplete="new-password" />
+                        <span class="adversarial-help">
+                            Splunk keeps the secret encrypted. The page never shows it again.
+                        </span>
+                    </div>
+
+                    <div class="adversarial-buttons">
+                        <button type="button" class="btn btn-primary" id="adversarial-save">Save</button>
+                    </div>
+
+                    <h3>Next steps</h3>
+                    <ol>
+                        <li>Create an alert, or open an existing one.</li>
+                        <li>
+                            Under <b>Trigger Actions</b>, add <b>Create Adversarial incident</b>
+                            or <b>Create Adversarial risk</b>. One alert can hold both actions.
+                        </li>
+                        <li>
+                            Set the title and the source, then save the alert. Leave the score
+                            fields empty to let AI Suggest Score assign the incident severity, or
+                            the risk urgency.
+                        </li>
+                    </ol>
+                    <p>
+                        The source must be one of the sources of your organization. The two record
+                        types hold two separate lists: <b>Settings &gt; Incidents</b> and
+                        <b>Settings &gt; Risks</b> in the Adversarial platform.
+                    </p>
+                    <p>
+                        To test the connection from a search, run one of these commands:
+                    </p>
+                    <pre><code>| makeresults | sendalert adversarial_incident param.title="Test incident from Splunk" param.source="SIEM"
+
+| makeresults | sendalert adversarial_risk param.title="Test risk from Splunk" param.source="Attack Surface Monitoring"</code></pre>
+                    <p>
+                        Change the source names to the sources of your organization. The app holds
+                        one example alert for each action, both disabled after an install. Find
+                        them in <b>Settings &gt; Searches, reports, and alerts</b>.
+                    </p>
+                </div>
+            </html>
+        </panel>
+    </row>
+</dashboard>

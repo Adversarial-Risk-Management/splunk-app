@@ -1,0 +1,10 @@
+#
+# Adversarial - object permissions.
+#
+# `export = system` makes the alert action available in every app, so an alert
+# that lives in the Search app can use it.
+#
+
+[]
+access = read : [ * ], write : [ admin, power ]
+export = system

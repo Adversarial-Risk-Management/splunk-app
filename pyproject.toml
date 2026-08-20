@@ -1,0 +1,19 @@
+[project]
+name = "adversarial-splunk-app"
+version = "1.0.0"
+description = "Example Splunk app that creates Adversarial incidents from Splunk alerts"
+requires-python = ">=3.9"
+# The Splunk app itself needs no packages. It uses only the Python standard
+# library, so it runs on the Python that ships with Splunk.
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The app modules live in the Splunk app layout, not in a Python package.
+pythonpath = ["adversarial/bin"]
+markers = [
+    "integration: talks to a real Adversarial API. Needs credentials in .env.",
+]
