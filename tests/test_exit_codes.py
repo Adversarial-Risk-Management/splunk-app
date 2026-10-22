@@ -9,7 +9,7 @@ import adversarial_alert as alert
 import adversarial_incident
 import adversarial_risk
 import pytest
-from adversarial_api import ApiError, TransportError
+from adversarial_api import ApiError, TokenError, TransportError
 from conftest import FakeClient, Stdin
 
 # Each case holds the action module, the settings that the action needs, and
@@ -71,12 +71,27 @@ def test_missing_credentials_return_the_validation_code(client, action, settings
 
 
 @pytest.mark.parametrize("action,settings,identifier", ACTIONS)
-@pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize(
+    "error",
+    [
+        TokenError(401, '{"error":"invalid_client"}', "url"),
+        TokenError(400, '{"error":"invalid_grant"}', "url"),
+        ApiError(401, '{"error":"invalid_token"}', "url"),
+    ],
+    ids=["token-401", "token-400", "api-401"],
+)
 def test_a_rejected_credential_returns_the_authentication_code(
-    client, action, settings, identifier, status
+    client, action, settings, identifier, error
 ):
-    client["create_error"] = ApiError(status, '{"error":"invalid_client"}', "url")
+    client["create_error"] = error
     assert action.send(payload(settings)) == alert.EXIT_AUTH_FAILED
+
+
+@pytest.mark.parametrize("action,settings,identifier", ACTIONS)
+def test_a_missing_permission_returns_the_permission_code(client, action, settings, identifier):
+    """A 403 comes with a valid token, so the credentials are not the problem."""
+    client["create_error"] = ApiError(403, '{"error":"Forbidden"}', "url")
+    assert action.send(payload(settings, tags="splunk")) == alert.EXIT_FORBIDDEN
 
 
 @pytest.mark.parametrize("action,settings,identifier", ACTIONS)
@@ -103,6 +118,16 @@ def test_a_failed_comment_still_reports_success(client, action, settings, identi
 def test_the_comment_uses_the_identifier_from_the_api(client, action, settings, identifier):
     action.send(payload(settings, add_comment="1"))
     assert FakeClient.instances[0].comments[0][0] == identifier
+
+
+@pytest.mark.parametrize("action,settings,identifier", ACTIONS)
+def test_an_answer_without_an_identifier_skips_the_comment(
+    monkeypatch, client, action, settings, identifier
+):
+    """The record exists, but no comment can reach it without its ID."""
+    monkeypatch.setattr(FakeClient, "_create", lambda self, record, answer: {})
+    assert action.send(payload(settings, add_comment="1")) == alert.OK
+    assert FakeClient.instances[0].comments == []
 
 
 @pytest.mark.parametrize("action,settings,identifier", ACTIONS)

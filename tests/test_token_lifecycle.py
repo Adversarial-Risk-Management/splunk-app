@@ -5,7 +5,13 @@ import time
 import urllib.parse
 
 import pytest
-from adversarial_api import AdversarialClient, ApiError, MemoryTokenCache, TransportError
+from adversarial_api import (
+    AdversarialClient,
+    ApiError,
+    MemoryTokenCache,
+    TokenError,
+    TransportError,
+)
 
 BASE_URL = "https://api.example.test/api"
 CLIENT_ID = "arm_sa_example"
@@ -61,6 +67,11 @@ def token_pair(access="access-1", refresh="refresh-1", expires_in=900):
     }
 
 
+def cached(**state):
+    """A cached pair that belongs to the client under test."""
+    return dict(state, base_url=BASE_URL, client_id=CLIENT_ID)
+
+
 def build_client(fake, cache=None):
     client = AdversarialClient(BASE_URL, CLIENT_ID, CLIENT_SECRET, cache=cache or MemoryTokenCache())
     return fake.install(client)
@@ -80,7 +91,7 @@ def test_an_empty_cache_uses_the_client_credentials_grant():
 
 def test_a_fresh_cached_token_needs_no_request():
     cache = MemoryTokenCache()
-    cache.save({"access_token": "cached", "refresh_token": "r", "expires_at": time.time() + 600})
+    cache.save(cached(access_token="cached", refresh_token="r", expires_at=time.time() + 600))
     fake = FakeApi()
     client = build_client(fake, cache)
 
@@ -92,7 +103,7 @@ def test_a_fresh_cached_token_needs_no_request():
 def test_a_token_inside_the_refresh_margin_is_refreshed():
     """A token with less than 60 seconds left is replaced before it is used."""
     cache = MemoryTokenCache()
-    cache.save({"access_token": "old", "refresh_token": "refresh-1", "expires_at": time.time() + 30})
+    cache.save(cached(access_token="old", refresh_token="refresh-1", expires_at=time.time() + 30))
     fake = FakeApi({("POST", "/v1/oauth/token"): token_pair(access="access-2", refresh="refresh-2")})
     client = build_client(fake, cache)
 
@@ -129,7 +140,7 @@ def test_the_cache_records_an_absolute_expiry_time():
 )
 def test_a_failed_refresh_falls_back_to_the_client_credentials_grant(failure):
     cache = MemoryTokenCache()
-    cache.save({"access_token": "old", "refresh_token": "expired", "expires_at": time.time() - 10})
+    cache.save(cached(access_token="old", refresh_token="expired", expires_at=time.time() - 10))
     fake = FakeApi({("POST", "/v1/oauth/token"): [failure, token_pair(access="access-3")]})
     client = build_client(fake, cache)
 
@@ -140,7 +151,7 @@ def test_a_failed_refresh_falls_back_to_the_client_credentials_grant(failure):
 
 def test_an_expired_token_without_a_refresh_token_uses_the_credentials():
     cache = MemoryTokenCache()
-    cache.save({"access_token": "old", "expires_at": time.time() - 10})
+    cache.save(cached(access_token="old", expires_at=time.time() - 10))
     fake = FakeApi({("POST", "/v1/oauth/token"): token_pair()})
     client = build_client(fake, cache)
 
@@ -150,11 +161,42 @@ def test_an_expired_token_without_a_refresh_token_uses_the_credentials():
 
 def test_force_new_ignores_a_fresh_cached_token():
     cache = MemoryTokenCache()
-    cache.save({"access_token": "cached", "expires_at": time.time() + 600})
+    cache.save(cached(access_token="cached", expires_at=time.time() + 600))
     fake = FakeApi({("POST", "/v1/oauth/token"): token_pair(access="access-4")})
     client = build_client(fake, cache)
 
     assert client.access_token(force_new=True) == "access-4"
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [
+        {"base_url": BASE_URL, "client_id": "arm_sa_other_org"},
+        {"base_url": "https://api.other.test/api", "client_id": CLIENT_ID},
+        # Version 1.0 of the app cached a pair without its identity.
+        {},
+    ],
+    ids=["other-client", "other-api", "no-identity"],
+)
+def test_a_cached_token_of_another_identity_is_not_used(owner):
+    """An alert that overrides the client ID or the URL needs its own token."""
+    cache = MemoryTokenCache()
+    cache.save(dict(owner, access_token="foreign", refresh_token="foreign-refresh",
+                    expires_at=time.time() + 600))
+    fake = FakeApi({("POST", "/v1/oauth/token"): token_pair(access="mine")})
+    client = build_client(fake, cache)
+
+    assert client.access_token() == "mine"
+    # The foreign refresh token is not sent either.
+    assert fake.grants() == ["client_credentials"]
+    saved = cache.load()
+    assert (saved["base_url"], saved["client_id"]) == (BASE_URL, CLIENT_ID)
+
+
+def test_a_refused_token_request_raises_a_token_error():
+    fake = FakeApi({("POST", "/v1/oauth/token"): ApiError(401, '{"error":"invalid_client"}', BASE_URL)})
+    with pytest.raises(TokenError):
+        build_client(fake).access_token()
 
 
 def test_a_broken_cache_does_not_stop_the_token_request():

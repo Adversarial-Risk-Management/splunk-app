@@ -154,6 +154,34 @@ def test_the_comment_setting_defaults_to_on(setting, expected):
     assert alert.wants_comment(payload(add_comment=setting)) is expected
 
 
+# -- the tags ----------------------------------------------------------------
+
+
+def test_the_tag_list_is_empty_by_default():
+    assert alert.tag_list(payload()) == []
+
+
+def test_the_tag_list_splits_the_setting_and_drops_repeats():
+    data = payload(tags=" splunk , detection,, splunk ")
+    assert alert.tag_list(data) == ["splunk", "detection"]
+
+
+# -- the create answer -------------------------------------------------------
+
+
+def test_created_record_reads_the_record_inside_a_register_entry():
+    created = {"incident": {"id": "INC-00007"}, "comment_count": 0, "tags": []}
+    assert alert.created_record(created, "incident") == {"id": "INC-00007"}
+
+
+def test_created_record_accepts_a_bare_record():
+    assert alert.created_record({"id": "RSK-00007"}, "risk") == {"id": "RSK-00007"}
+
+
+def test_created_record_is_empty_for_an_answer_that_is_not_an_object():
+    assert alert.created_record(None, "risk") == {}
+
+
 # -- validation --------------------------------------------------------------
 
 

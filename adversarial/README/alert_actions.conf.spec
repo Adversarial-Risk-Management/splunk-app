@@ -16,6 +16,9 @@ param.base_url = <string>
 param.client_id = <string>
 * The client ID of a credential service account (arm_sa_...).
 * Leave this setting empty to use the value from the setup page.
+* Another client ID needs its secret in the Splunk secret store. Store it with
+  `bin/configure_credentials.py --add-client`. Without it, the action stops
+  with exit code 2.
 * There is no `param.client_secret`. Splunk keeps a saved alert in plain text,
   so the client secret stays in the Splunk secret store.
 * Default: empty
@@ -47,6 +50,13 @@ param.status = <string>
 param.source = <string>
 * The source of the incident. The source must exist in your organization.
 * Default: SIEM
+
+param.tags = <string>
+* Item tags for the incident, with a comma between tags. Each tag is the text
+  of an existing item tag of your organization, or its UUID.
+* The platform does not create a tag. An unknown tag makes the API reject the
+  incident, which gives exit code 4.
+* Default: empty
 
 param.fields = <string>
 * Field names from the first search result, with a comma between names. The
@@ -80,6 +90,9 @@ param.base_url = <string>
 param.client_id = <string>
 * The client ID of a credential service account (arm_sa_...).
 * Leave this setting empty to use the value from the setup page.
+* Another client ID needs its secret in the Splunk secret store. Store it with
+  `bin/configure_credentials.py --add-client`. Without it, the action stops
+  with exit code 2.
 * Default: empty
 
 param.title = <string>
@@ -101,6 +114,13 @@ param.source = <string>
 * The source of the risk. The source must exist in your organization. The risk
   sources and the incident sources are separate lists.
 * Default: Attack Surface Monitoring
+
+param.tags = <string>
+* Item tags for the risk, with a comma between tags. Each tag is the text
+  of an existing item tag of your organization, or its UUID.
+* The platform does not create a tag. An unknown tag makes the API reject the
+  risk, which gives exit code 4.
+* Default: empty
 
 param.status = <string>
 * The status of the risk: New, Urgency Proposed, Remediation, Closure Proposed

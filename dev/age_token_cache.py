@@ -22,7 +22,7 @@ import time
 SPLUNK_HOME = os.environ.get("SPLUNK_HOME", "/opt/splunk")
 sys.path.insert(0, os.path.join(SPLUNK_HOME, "etc", "apps", "adversarial", "bin"))
 
-from splunk_rest import TOKEN_CACHE_USERNAME, SplunkRest  # noqa: E402
+from splunk_rest import SplunkRest, token_username  # noqa: E402
 
 SECONDS_LEFT = 30
 
@@ -31,14 +31,16 @@ def main():
     rest = SplunkRest(os.environ.get("SPLUNK_MANAGEMENT_URI", "https://localhost:8089"))
     rest.login(os.environ.get("SPLUNK_USERNAME", "admin"), os.environ["SPLUNK_PASSWORD"])
 
-    raw = rest.read_secret(TOKEN_CACHE_USERNAME)
+    # The default service account has its own token entry.
+    username = token_username(rest.read_config().get("client_id", ""))
+    raw = rest.read_secret(username)
     if not raw:
         print("The token cache is empty. Run an alert first.")
         return 1
 
     state = json.loads(raw)
     state["expires_at"] = time.time() + SECONDS_LEFT
-    rest.write_secret(TOKEN_CACHE_USERNAME, json.dumps(state))
+    rest.write_secret(username, json.dumps(state))
 
     print("The cached access token now expires in %d s." % SECONDS_LEFT)
     print("It holds a refresh token: %s" % bool(state.get("refresh_token")))

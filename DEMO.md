@@ -187,9 +187,9 @@ disables it again, so the demo leaves no schedule behind.
 | --- | --- |
 | `dev/install.sh` stops at the credential check | The container cannot reach the API. Test the path with the `curl` command in step 3. Check that the API listens on `0.0.0.0`. |
 | The `detect` or `posture` scenario finds 0 results | The sample events are too old. Run `dev/load_sample_data.sh`. |
-| Exit code 3 in the log | The client ID or the client secret is wrong, the service account is not active, or the account does not hold the role for the record type. |
+| Exit code 3 in the log | The client ID or the client secret is wrong, or the service account is not active. |
 | Exit code 4 in the log | The source name is not one of the sources of the organization. Run `dev/demo.sh connect` to list them. The risk sources and the incident sources are two separate lists. |
-| HTTP 403 "Insufficient permissions" | The service account holds no role for that record type. Add **Risk Editor** or **Incident Editor** in step 1. |
+| Exit code 7, HTTP 403 "Insufficient permissions" | The service account holds no role for that record type. Add **Risk Editor** or **Incident Editor** in step 1. |
 | Exit code 5 in the log | The Splunk server cannot reach the API URL. Check `ADVERSARIAL_BASE_URL_CONTAINER`. |
 | The setup page stays empty | Reload the page. Splunk needs the app permissions from `metadata/default.meta`. |
 

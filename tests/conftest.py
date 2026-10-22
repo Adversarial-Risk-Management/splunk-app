@@ -13,6 +13,7 @@ class FakeClient:
         self.base_url = base_url
         self.client_id = client_id
         self.client_secret = client_secret
+        self.cache = cache
         self.token_source = "client_credentials"
         # Every record that the action created, and every comment it added.
         self.records = []
@@ -22,8 +23,14 @@ class FakeClient:
         FakeClient.instances.append(self)
 
     def create_incident(self, incident):
+        # POST /v1/incidents answers with an incident register entry.
         return self._create(
-            incident, {"id": "INC-00042", "severity": incident.get("severity")}
+            incident,
+            {
+                "incident": {"id": "INC-00042", "severity": incident.get("severity")},
+                "comment_count": 0,
+                "tags": [],
+            },
         )
 
     def create_risk(self, risk):
@@ -35,7 +42,9 @@ class FakeClient:
                     "id": "RSK-00042",
                     "urgency": "Medium",
                     "due_date": "2026-11-15T00:00:00Z",
-                }
+                },
+                "comments": 0,
+                "tags": [],
             },
         )
 

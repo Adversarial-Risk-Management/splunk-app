@@ -85,11 +85,14 @@ def records(collection, key, access_token):
     rows = []
     page = 1
     while True:
-        answer = get("/v1/%s?page=%d&page_size=100" % (collection, page), access_token)
+        # A list holds only the top-level records unless the query asks for
+        # the linked children too, which `parent_id=null&parent_id=any` does.
+        answer = get("/v1/%s?parent_id=null&parent_id=any&page=%d&page_size=100"
+                     % (collection, page), access_token)
         results = answer.get("results", [])
         rows.extend(item.get(key, item) for item in results)
         pagination = answer.get("pagination") or {}
-        if not results or not pagination.get("has_next"):
+        if not results or page >= pagination.get("total_pages", 0):
             break
         page += 1
     rows.sort(key=lambda item: item.get("created_date", ""), reverse=True)
