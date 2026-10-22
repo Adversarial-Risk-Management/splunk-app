@@ -34,6 +34,7 @@ param.likelihood_reason   likelihood_reasoning
 param.impact_reason       impact_reasoning
 param.remediation_task    remediation_task
 param.control_statement   control_statement
+param.tags                tags
 (the trigger time)        discovered_date
 
 The platform derives the urgency of a risk from the likelihood and the impact,
@@ -128,6 +129,9 @@ def build_risk(payload):
     urgency = urgency_of(payload)
     if urgency:
         risk["initially_reported_urgency"] = urgency
+    tags = alert.tag_list(payload)
+    if tags:
+        risk["tags"] = tags
     return risk
 
 
@@ -177,8 +181,11 @@ def send(payload):
 
     # POST /v1/risks answers with a risk register entry, which holds the risk
     # in a `risk` object.
-    record = created.get("risk") or created
-    identifier = record.get("id", "unknown")
+    record = alert.created_record(created, "risk")
+    identifier = record.get("id")
+    if not identifier:
+        alert.log("WARN", "The API answer holds no risk ID: %s" % str(created)[:300])
+        return OK
     # The urgency and the due date stay empty until the risk holds a likelihood
     # and an impact. The log names the score, so an operator can see whether
     # the platform must still assign it.

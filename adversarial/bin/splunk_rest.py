@@ -13,16 +13,34 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-# The app owns one realm in the secret store. Two entries live in it:
+# The app owns one realm in the secret store. These entries live in it:
 #
-#   config       the API URL, the client ID and the client secret
-#   token_cache  the current OAuth token pair
+#   config               the API URL and the default client ID, as JSON
+#   secret_<client ID>   the client secret of one service account
+#   token_<client ID>    the cached OAuth token pair of one service account
+#
+# The setup page reads only `config`, so the client secret never reaches the
+# browser. Each service account has its own secret and its own token cache, so
+# an alert that overrides the client ID uses the right secret and the right
+# token.
 #
 # Keep colons out of realm and user names. Splunk builds the entry name as
-# "<realm>:<user>:" and a colon inside either part needs an escape.
+# "<realm>:<user>:" and a colon inside either part needs an escape. A client ID
+# holds only letters, digits and underscores.
 SECRET_REALM = "adversarial"
 CONFIG_USERNAME = "config"
-TOKEN_CACHE_USERNAME = "token_cache"
+SECRET_PREFIX = "secret_"
+TOKEN_PREFIX = "token_"
+# Version 1.0 of the app kept one token pair for every service account here.
+LEGACY_TOKEN_CACHE_USERNAME = "token_cache"
+
+
+def secret_username(client_id):
+    return SECRET_PREFIX + client_id
+
+
+def token_username(client_id):
+    return TOKEN_PREFIX + client_id
 
 HTTP_TIMEOUT_SECONDS = 30
 
@@ -127,10 +145,25 @@ class SplunkRest:
             if "HTTP 404" not in str(error):
                 raise
 
+    def list_usernames(self):
+        """Return the user names of every entry in the app realm."""
+        result = self._call("GET", self._passwords_path() + "?count=0")
+        names = []
+        for entry in result.get("entry") or []:
+            content = entry.get("content") or {}
+            if content.get("realm") == SECRET_REALM and content.get("username"):
+                names.append(content["username"])
+        return sorted(names)
+
     # -- App configuration ------------------------------------------------
 
     def read_config(self):
-        """Return the stored app configuration as a dictionary."""
+        """Return the stored API URL and default client ID as a dictionary.
+
+        Version 1.0 of the app also kept the client secret in this entry. The
+        method still returns it, so an install that has not saved its settings
+        again keeps working.
+        """
         raw = self.read_secret(CONFIG_USERNAME)
         if not raw:
             return {}
@@ -139,18 +172,55 @@ class SplunkRest:
         except ValueError:
             raise SplunkRestError("The stored configuration is not valid JSON.")
 
-    def write_config(self, base_url, client_id, client_secret):
-        """Store the API URL and the service account credentials."""
+    def write_config(self, base_url, client_id):
+        """Store the API URL and the default client ID, without a secret."""
         self.write_secret(
-            CONFIG_USERNAME,
-            json.dumps(
-                {
-                    "base_url": base_url,
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                }
-            ),
+            CONFIG_USERNAME, json.dumps({"base_url": base_url, "client_id": client_id})
         )
+
+    def read_client_secret(self, client_id):
+        """Return the stored secret of one service account, or None."""
+        secret = self.read_secret(secret_username(client_id))
+        if secret:
+            return secret
+        # Version 1.0 kept the secret of the default account in `config`.
+        legacy = self.read_config()
+        if legacy.get("client_id") == client_id:
+            return legacy.get("client_secret") or None
+        return None
+
+    def write_client_secret(self, client_id, client_secret):
+        """Store the secret of one service account and drop its cached token.
+
+        A new secret can belong to a reset service account, so the old token
+        pair must not stay in use.
+        """
+        self.write_secret(secret_username(client_id), client_secret)
+        self.delete_secret(token_username(client_id))
+
+    def delete_client(self, client_id):
+        """Remove the secret and the cached token of one service account."""
+        self.delete_secret(secret_username(client_id))
+        self.delete_secret(token_username(client_id))
+
+    def stored_client_ids(self):
+        """Return the client IDs that have a stored secret."""
+        return [
+            name[len(SECRET_PREFIX):]
+            for name in self.list_usernames()
+            if name.startswith(SECRET_PREFIX)
+        ]
+
+    def clear_token_caches(self):
+        """Remove every cached token pair. Returns the number removed."""
+        names = [
+            name
+            for name in self.list_usernames()
+            if name.startswith(TOKEN_PREFIX) or name == LEGACY_TOKEN_CACHE_USERNAME
+        ]
+        for name in names:
+            self.delete_secret(name)
+        return len(names)
 
 
 class SecretStoreTokenCache:
@@ -158,15 +228,17 @@ class SecretStoreTokenCache:
 
     Alert actions run as separate short-lived processes. A shared cache lets
     them re-use one access token for its full 15-minute life, and lets them
-    use the refresh-token grant instead of the client secret.
+    use the refresh-token grant instead of the client secret. Each service
+    account has its own entry.
     """
 
-    def __init__(self, rest, log=None):
+    def __init__(self, rest, client_id, log=None):
         self.rest = rest
+        self.username = token_username(client_id)
         self.log = log or (lambda level, message: None)
 
     def load(self):
-        raw = self.rest.read_secret(TOKEN_CACHE_USERNAME)
+        raw = self.rest.read_secret(self.username)
         if not raw:
             return None
         try:
@@ -176,4 +248,4 @@ class SecretStoreTokenCache:
             return None
 
     def save(self, state):
-        self.rest.write_secret(TOKEN_CACHE_USERNAME, json.dumps(state))
+        self.rest.write_secret(self.username, json.dumps(state))

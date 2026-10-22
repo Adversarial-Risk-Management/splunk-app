@@ -76,6 +76,20 @@
     <br clear="both" />
 
     <div class="control-group">
+        <label class="control-label" for="adversarial_risk_tags">Tags</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_risk.param.tags"
+                   id="adversarial_risk_tags" placeholder="Optional" />
+            <span class="help-block">
+                Item tags for the risk, with a comma between tags. Each tag must
+                exist in your organization. The platform does not create a tag, and
+                it rejects the risk if a tag is unknown.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
         <label class="control-label">Status</label>
         <div class="controls">
             <select name="action.adversarial_risk.param.status">
@@ -232,7 +246,9 @@
       AI Suggest Score assigns the threat objectives.
 
       The API URL and the service account come from the setup page. To change
-      them for one alert, set `param.base_url` in alert_actions.conf. The
-      client secret always stays in the Splunk secret store.
+      them for one alert, set `param.base_url` or `param.client_id` in
+      alert_actions.conf. The client secret always stays in the Splunk secret
+      store: store the secret of another client ID with
+      bin/configure_credentials.py --add-client.
     -->
 </form>

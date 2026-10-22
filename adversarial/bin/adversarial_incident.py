@@ -24,6 +24,7 @@ param.severity         severity, empty for AI Suggest Score
 param.severity_reason  severity_reasoning
 param.status           status
 param.source           source
+param.tags             tags
 (the trigger time)     detected_date
 
 `adversarial_alert.py` holds the code that both actions share, and the exit
@@ -86,6 +87,9 @@ def build_incident(payload):
     reasoning = (config.get("severity_reasoning") or "").strip()
     if reasoning:
         incident["severity_reasoning"] = reasoning
+    tags = alert.tag_list(payload)
+    if tags:
+        incident["tags"] = tags
     return incident
 
 
@@ -126,11 +130,17 @@ def send(payload):
     if created is None:
         return code
 
-    identifier = created.get("id", "unknown")
+    # POST /v1/incidents answers with an incident register entry, which holds
+    # the incident in an `incident` object.
+    record = alert.created_record(created, "incident")
+    identifier = record.get("id")
+    if not identifier:
+        alert.log("WARN", "The API answer holds no incident ID: %s" % str(created)[:300])
+        return OK
     alert.log(
         "INFO",
         "Created incident %s with severity %s. Token source: %s."
-        % (identifier, created.get("severity"), client.token_source),
+        % (identifier, record.get("severity") or "not yet assigned", client.token_source),
     )
 
     if alert.wants_comment(payload):

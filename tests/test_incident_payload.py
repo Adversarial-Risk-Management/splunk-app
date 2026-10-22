@@ -75,6 +75,12 @@ def test_the_incident_body_omits_an_empty_field():
     assert "severity_reasoning" not in incident
 
 
+def test_the_tags_reach_the_incident_body():
+    incident = action.build_incident(payload(tags="splunk, brute-force"))
+    assert incident["tags"] == ["splunk", "brute-force"]
+    assert "tags" not in action.build_incident(payload())
+
+
 def test_the_comment_names_the_severity_of_the_incident():
     data = payload(severity="SEV-2")
     comment = action.build_comment(data, action.build_incident(data))

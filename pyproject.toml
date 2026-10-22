@@ -1,7 +1,7 @@
 [project]
 name = "adversarial-splunk-app"
-version = "1.0.0"
-description = "Example Splunk app that creates Adversarial incidents from Splunk alerts"
+version = "1.1.0"
+description = "Example Splunk app that creates Adversarial incidents and risks from Splunk alerts"
 requires-python = ">=3.9"
 # The Splunk app itself needs no packages. It uses only the Python standard
 # library, so it runs on the Python that ships with Splunk.

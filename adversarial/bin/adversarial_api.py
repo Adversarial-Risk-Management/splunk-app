@@ -17,6 +17,10 @@ The client keeps the pair in a cache so that many alerts share one token:
 3. If there is no refresh token, or the refresh fails, use the
    `client_credentials` grant.
 
+A cached pair records the API URL and the client ID that it belongs to. The
+client ignores a pair with other values, so an alert that sends to another
+organization never uses the token of the default service account.
+
 The module uses only the Python standard library. You do not need to install
 packages into Splunk.
 """
@@ -45,6 +49,10 @@ class ApiError(Exception):
         self.status = status
         self.body = body
         self.url = url
+
+
+class TokenError(ApiError):
+    """The token endpoint refused the client ID or the client secret."""
 
 
 class TransportError(Exception):
@@ -132,6 +140,9 @@ class AdversarialClient:
             "refresh_token": pair.get("refresh_token"),
             "expires_at": time.time() + float(pair.get("expires_in", 900)),
             "scope": pair.get("scope"),
+            # The identity that the pair belongs to. See `_belongs_here`.
+            "base_url": self.base_url,
+            "client_id": self.client_id,
         }
         try:
             self.cache.save(state)
@@ -142,7 +153,21 @@ class AdversarialClient:
         return state
 
     def _grant(self, fields):
-        return self._post_form("/v1/oauth/token", fields)
+        try:
+            return self._post_form("/v1/oauth/token", fields)
+        except ApiError as error:
+            raise TokenError(error.status, error.body, error.url) from error
+
+    def _belongs_here(self, cached):
+        """Whether a cached pair was issued to this API URL and client ID.
+
+        A pair from another identity, or a pair from an older version of the
+        app that does not record its identity, is not used.
+        """
+        return (
+            cached.get("base_url") == self.base_url
+            and cached.get("client_id") == self.client_id
+        )
 
     def access_token(self, force_new=False):
         """Return a usable access token, from the cache if possible."""
@@ -152,6 +177,10 @@ class AdversarialClient:
                 cached = self.cache.load()
             except Exception as error:  # noqa: BLE001 - the cache is optional
                 self.log("WARN", "Could not read the token cache: %s" % error)
+
+        if cached and not self._belongs_here(cached):
+            self.log("INFO", "The cached token belongs to another client. Ignoring it.")
+            cached = None
 
         if cached and cached.get("access_token"):
             remaining = cached.get("expires_at", 0) - time.time()

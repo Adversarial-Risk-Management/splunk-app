@@ -129,6 +129,19 @@ Use the setup page or the command line. Splunk keeps the values encrypted in
 the secret store. The client secret is never written to a configuration file.
 Both actions read the same credentials.
 
+The app keeps these entries in the secret store, in the realm `adversarial`:
+
+| Entry | Content |
+| --- | --- |
+| `config` | The API URL and the default client ID. No secret. |
+| `secret_<client ID>` | The client secret of one service account. |
+| `token_<client ID>` | The cached token pair of one service account. |
+
+The setup page reads only `config`, so the client secret never reaches the
+browser. An install of version 1.0 kept the secret inside `config`. The app
+still reads it there, and the next save on the setup page, or with
+`configure_credentials.py`, moves it into its own entry.
+
 **Setup page**
 
 1. Open the **Adversarial** app.
@@ -149,10 +162,36 @@ asks for the password of the `admin` user. To give the credentials in the
 command, use `--splunk-user` and `--splunk-password`, or set `SPLUNK_USERNAME`
 and `SPLUNK_PASSWORD` in the environment.
 
-To check the credentials, use the `--verify` option. The check gets a token and
-reads the service account identity. It does not create a record.
+To check the credentials, use the `--verify` option. The check gets a token,
+reads the service account identity and its roles, and names the alert actions
+that the account can run. It does not create a record. `--require` names what
+your alerts use, and the check fails when the account cannot do it:
 
-    $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py --verify
+    $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py --verify \
+        --require incident,risk,tags
+
+| `--require` value | Permission |
+| --- | --- |
+| `incident` | `incidents:write`, for `adversarial_incident` |
+| `risk` | `risks:write`, for `adversarial_risk` |
+| `tags` | `tags:read`, for the **Tags** setting |
+
+`--show` prints the stored settings. It never prints a secret.
+
+**More than one organization**
+
+An alert can send its records to another service account, for example in a
+second organization. Store the secret of that account first:
+
+    $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py --add-client \
+        --client-id arm_sa_... --client-secret arm_sk_...
+
+Then set `param.client_id` of the alert to that client ID, and
+`param.base_url` if the organization uses another API URL. Splunk keeps a saved
+alert in plain text, so an alert never holds a secret. An alert that names a
+client ID with no stored secret stops with exit code 2. To check that account,
+run `--verify --client-id arm_sa_...`. To remove it, run
+`--remove-client arm_sa_...`.
 
 ## Add an alert action to an alert
 
@@ -178,6 +217,7 @@ field of the first search result.
 | Severity reason | Why the severity is correct |
 | Status | New, In Progress or Review |
 | Source | The incident source. See "Source names" after the tables. |
+| Tags | Item tags, with a comma between tags. See "Tags" after the tables. |
 | Fields | Field names from the first search result. Use a comma between names. A name can hold a wildcard, for example `src_*`. |
 | Splunk link | Add a comment with a link to the search results |
 
@@ -189,6 +229,7 @@ field of the first search result.
 | Description | Text at the start of the risk description |
 | Type | Code, Configuration, Control Deficiency, Policy, Procedural, Vulnerability or Third-party |
 | Source | The risk source. See "Source names" after the tables. |
+| Tags | Item tags, with a comma between tags. See "Tags" after the tables. |
 | Status | New, Urgency Proposed or Remediation |
 | Initially reported urgency | Empty, `auto`, or one of Critical, High, Medium, Low, Info |
 | Likelihood | One of Remote, Unlikely, Possible, Probable, Imminent |
@@ -210,6 +251,13 @@ The source must be one of the sources of your organization. The two record
 types hold two separate lists. To read them, open the Adversarial platform and
 go to **Settings > Incidents** or **Settings > Risks**. A source name that the
 platform does not hold gives exit code 4.
+
+**Tags**
+
+A tag must exist in your organization before an alert names it. Use the text
+of the tag, or its UUID. The platform does not create a tag, and it rejects the
+record if a tag is unknown, which gives exit code 4. The service account reads
+the tags with the `tags:read` permission, which the editor roles hold.
 
 **More status values**
 
@@ -299,7 +347,9 @@ that the search does not hold keeps the default value from
 
 The Adversarial API uses OAuth 2.1. The alert action holds an access token and
 a refresh token in the Splunk secret store, and shares them between alerts and
-between both actions.
+between both actions. Each service account has its own token pair, and a pair
+records the API URL and the client ID that it belongs to. An alert never uses
+the token of another account.
 
 - The alert action reuses a valid access token.
 - Less than 60 seconds before the token expires, the alert action uses the
@@ -308,7 +358,8 @@ between both actions.
 - If the API answers 401, the alert action gets a new token and sends the
   request one more time.
 
-To remove the stored tokens, use this command. The next alert gets a new token.
+To remove every stored token pair, use this command. The next alert gets a new
+token. A new secret for a client ID removes the pair of that client ID.
 
     $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py --clear-token-cache
 
@@ -325,6 +376,7 @@ actions use the same codes.
 | 4 | The API refused the record. |
 | 5 | The Splunk server cannot reach the API. |
 | 6 | An unexpected error occurred. |
+| 7 | The service account lacks a permission, or the API refused the address of the Splunk server. |
 
 The alert action reports success if the record exists but the comment failed.
 The record is the result, and the comment is extra.
@@ -341,9 +393,11 @@ Use this search.
 | Problem | Action |
 | --- | --- |
 | Exit code 2 | Read the log. It names the setting and the valid values. If the credentials are missing, open the setup page and store them again. |
-| Exit code 3 | Check that the service account is active, and that it holds the role for the record type. Check that the client ID and the client secret are correct. |
-| Exit code 4 | Check the source name. The source must exist in your organization. The risk sources and the incident sources are two separate lists. |
+| Exit code 2 and "no client secret" | The alert sets `param.client_id` to an account with no stored secret. Run `configure_credentials.py --add-client`. |
+| Exit code 3 | The token endpoint refused the client ID or the secret. Check that both are correct, that the service account is active, and that it has not expired. |
+| Exit code 4 | Check the source name and the tags. Both must exist in your organization. The risk sources and the incident sources are two separate lists. |
 | Exit code 5 | Check that the Splunk server can reach the API URL. |
+| Exit code 7 | The token is valid, but the account may not do the request. Give it the role for the record type, and `tags:read` if the alert sets tags. If the service account has an IP allowlist, add the address of the Splunk server. Run `--verify --require ...` to see what is missing. |
 
 ## Files
 

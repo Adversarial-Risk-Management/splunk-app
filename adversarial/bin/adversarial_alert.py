@@ -43,9 +43,11 @@ Exit codes
 0  The record was created.
 2  The alert settings are not valid.
 3  Authentication failed. Check the client ID and the client secret.
-4  The API rejected the request. Check the source name.
+4  The API rejected the request. Check the source name and the tags.
 5  The API was not reachable.
 6  An unexpected error occurred.
+7  The service account lacks a permission, for example `incidents:write` or
+   `tags:read`, or the API refused the address of the Splunk server.
 """
 
 import datetime
@@ -55,7 +57,7 @@ import re
 import sys
 import traceback
 
-from adversarial_api import AdversarialClient, ApiError, TransportError
+from adversarial_api import AdversarialClient, ApiError, TokenError, TransportError
 from splunk_rest import SecretStoreTokenCache, SplunkRest, SplunkRestError
 
 OK = 0
@@ -64,6 +66,7 @@ EXIT_AUTH_FAILED = 3
 EXIT_API_REJECTED = 4
 EXIT_NOT_REACHABLE = 5
 EXIT_UNEXPECTED = 6
+EXIT_FORBIDDEN = 7
 
 # Keep the description inside a size that reads well in the platform UI.
 MAX_DESCRIPTION_CHARS = 6000
@@ -216,6 +219,21 @@ def build_comment(payload, action, extra=None):
     return "\n".join(lines)
 
 
+def tag_list(payload):
+    """Return the tags that the "Tags" setting names, or an empty list.
+
+    The setting is a comma-separated list. Each name is the content of an
+    existing item tag of the organization, or the UUID of one. The platform
+    does not create a tag, and it rejects a name that it does not hold.
+    """
+    setting = payload["configuration"].get("tags") or ""
+    tags = []
+    for name in re.split(r"\s*,\s*", setting.strip()):
+        if name and name not in tags:
+            tags.append(name)
+    return tags
+
+
 def wants_comment(payload):
     """Whether the "Splunk link" setting asks for a comment."""
     return (payload["configuration"].get("add_comment") or "1") == "1"
@@ -260,9 +278,11 @@ def check_choice(payload, setting, valid, allow_auto=False):
 def load_settings(payload):
     """Read the API URL and the credentials.
 
-    The Splunk secret store holds the values that the setup page saved. The
-    alert action can override each value, which lets one Splunk instance send
-    records to more than one organization.
+    The Splunk secret store holds the values that the setup page saved. An
+    alert can override the API URL and the client ID, which lets one Splunk
+    instance send records to more than one organization. The secret of an
+    overriding client ID must be in the secret store too: store it with
+    `configure_credentials.py --add-client`.
     """
     config = payload["configuration"]
     stored = {}
@@ -279,11 +299,21 @@ def load_settings(payload):
             # The alert still works if the settings carry the credentials.
             log("WARN", "Could not read the app configuration: %s" % error)
 
+    client_id = (config.get("client_id") or "").strip() or stored.get("client_id", "")
+    # A payload carries a client secret only in a test outside Splunk. An
+    # alert has no `param.client_secret`, because Splunk keeps a saved alert
+    # in plain text.
+    secret = (config.get("client_secret") or "").strip()
+    if not secret and rest and client_id:
+        try:
+            secret = rest.read_client_secret(client_id) or ""
+        except SplunkRestError as error:
+            log("WARN", "Could not read the client secret of %s: %s" % (client_id, error))
+
     settings = {
         "base_url": (config.get("base_url") or "").strip() or stored.get("base_url", ""),
-        "client_id": (config.get("client_id") or "").strip() or stored.get("client_id", ""),
-        "client_secret": (config.get("client_secret") or "").strip()
-        or stored.get("client_secret", ""),
+        "client_id": client_id,
+        "client_secret": secret,
     }
     return settings, rest
 
@@ -296,6 +326,14 @@ def connect(payload):
     """
     settings, rest = load_settings(payload)
     missing = [name for name in REQUIRED_SETTINGS if not settings[name]]
+    if missing == ["client_secret"]:
+        log(
+            "FATAL",
+            "The secret store holds no client secret for %s. Store it with "
+            "bin/configure_credentials.py --add-client, or use the setup page "
+            "if it is the default service account." % settings["client_id"],
+        )
+        return None, EXIT_VALIDATION_FAILED
     if missing:
         log(
             "FATAL",
@@ -304,7 +342,7 @@ def connect(payload):
         )
         return None, EXIT_VALIDATION_FAILED
 
-    cache = SecretStoreTokenCache(rest, log) if rest else None
+    cache = SecretStoreTokenCache(rest, settings["client_id"], log) if rest else None
     client = AdversarialClient(
         settings["base_url"],
         settings["client_id"],
@@ -327,15 +365,41 @@ def submit(create, record, kind):
     log("INFO", "Creating the %s: %s" % (kind, json.dumps(record)[:500]))
     try:
         return create(record), OK
+    except TokenError as error:
+        log("FATAL", "The token endpoint refused the client ID or the secret: %s" % error)
+        return None, EXIT_AUTH_FAILED
     except ApiError as error:
-        if error.status in (401, 403):
-            log("FATAL", "The API refused the credentials: %s" % error)
+        if error.status == 401:
+            log("FATAL", "The API refused the access token: %s" % error)
             return None, EXIT_AUTH_FAILED
+        if error.status == 403:
+            # The token is valid, so the credentials are right. A 403 names a
+            # missing permission, such as `incidents:write` for the record or
+            # `tags:read` for the tags, or an address outside the IP allowlist
+            # of the service account.
+            log(
+                "FATAL",
+                "The service account may not create the %s. Check its roles, and "
+                "the IP allowlist: %s" % (kind, error),
+            )
+            return None, EXIT_FORBIDDEN
         log("FATAL", "The API rejected the %s: %s" % (kind, error))
         return None, EXIT_API_REJECTED
     except TransportError as error:
         log("FATAL", "The API was not reachable: %s" % error)
         return None, EXIT_NOT_REACHABLE
+
+
+def created_record(created, key):
+    """Return the record inside the answer of a create request.
+
+    `POST /v1/incidents` and `POST /v1/risks` answer with a register entry.
+    The entry holds the record in an `incident` or a `risk` object, next to
+    the tags, the threat objectives and the counts.
+    """
+    if isinstance(created, dict) and isinstance(created.get(key), dict):
+        return created[key]
+    return created if isinstance(created, dict) else {}
 
 
 def comment(add, identifier, text):

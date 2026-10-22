@@ -1,10 +1,12 @@
 /*
  * Setup page logic for the Adversarial app.
  *
- * The page reads and writes one entry in the Splunk secret store:
- *   realm "adversarial", user "config"
- * The entry holds a JSON object with the API URL, the client ID and the client
- * secret. Splunk encrypts the value on disk.
+ * The page uses these entries in the Splunk secret store, realm "adversarial":
+ *   config               JSON with the API URL and the default client ID
+ *   secret_<client ID>   the client secret of that service account
+ *   token_<client ID>    the cached token pair, removed when the secret changes
+ * Splunk encrypts each value on disk. The page reads only `config`, so the
+ * client secret never travels to the browser.
  *
  * The code calls the Splunk management API through the proxy that Splunk Web
  * offers at /splunkd/__raw. It uses no library, so the page keeps working
@@ -15,9 +17,15 @@
 
     var APP = 'adversarial';
     var REALM = 'adversarial';
-    var CONFIG_ENTRY = encodeURIComponent(REALM + ':config:');
-    var TOKEN_CACHE_ENTRY = encodeURIComponent(REALM + ':token_cache:');
+    var CONFIG_ENTRY = entry('config');
     var PASSWORDS_PATH = '/servicesNS/nobody/' + APP + '/storage/passwords';
+
+    /* The stored settings, as the last load read them. */
+    var stored = {};
+
+    function entry(username) {
+        return encodeURIComponent(REALM + ':' + username + ':');
+    }
 
     /* The page URL looks like /en-US/app/<app>/<view>, so the part before
      * "/app/" is the prefix that the REST proxy needs. */
@@ -74,7 +82,8 @@
     }
 
     /* Show what is stored, so an administrator can confirm the state. The
-     * secret is never sent back to the page. */
+     * `config` entry holds no secret. An install from version 1.0 still keeps
+     * the secret there until the settings are saved again. */
     function load() {
         return request('GET', PASSWORDS_PATH + '/' + CONFIG_ENTRY).then(function (result) {
             if (result.status === 404) {
@@ -86,17 +95,22 @@
                     '). Your Splunk user needs the list_storage_passwords capability.');
                 return;
             }
-            var config = {};
             try {
-                config = JSON.parse(result.data.entry[0].content.clear_password);
+                stored = JSON.parse(result.data.entry[0].content.clear_password);
             } catch (error) {
                 setStatus('error', 'The stored settings are not readable. Save them again.');
                 return;
             }
-            element('adversarial-base-url').value = config.base_url || '';
-            element('adversarial-client-id').value = config.client_id || '';
-            setStatus('ok', 'The app is set up. Client ID: ' + (config.client_id || 'unknown') +
-                '. Leave the secret empty to keep the stored secret.');
+            element('adversarial-base-url').value = stored.base_url || '';
+            element('adversarial-client-id').value = stored.client_id || '';
+            var note = stored.client_secret ?
+                ' Click Save once to move the secret into its own encrypted entry.' :
+                ' Leave the secret empty to keep the stored secret.';
+            setStatus('ok', 'The app is set up. Client ID: ' + (stored.client_id || 'unknown') +
+                '.' + note);
+            /* Forget the old combined secret as soon as the page has seen it. */
+            stored.legacySecret = stored.client_secret;
+            delete stored.client_secret;
         }).catch(function (error) {
             setStatus('error', 'Could not reach the Splunk management API: ' + error);
         });
@@ -104,8 +118,8 @@
 
     /* Write the entry. A missing entry needs a create, so an update that
      * returns 404 falls back to a create. */
-    function writeSecret(entry, username, value) {
-        return request('POST', PASSWORDS_PATH + '/' + entry, { password: value })
+    function writeSecret(username, value) {
+        return request('POST', PASSWORDS_PATH + '/' + entry(username), { password: value })
             .then(function (result) {
                 if (result.ok) { return result; }
                 if (result.status !== 404) { return Promise.reject(result.text); }
@@ -115,6 +129,16 @@
                     return created.ok ? created : Promise.reject(created.text);
                 });
             });
+    }
+
+    /* Remove an entry. A missing entry is fine; any other failure stops the
+     * save, because a stale token would keep sending to the old account. */
+    function deleteSecret(username) {
+        return request('DELETE', PASSWORDS_PATH + '/' + entry(username)).then(function (result) {
+            if (result.ok || result.status === 404) { return result; }
+            return Promise.reject('HTTP ' + result.status + ' while removing ' + username +
+                ': ' + result.text);
+        });
     }
 
     function save() {
@@ -131,31 +155,43 @@
             return;
         }
 
+        if (!/^[A-Za-z0-9_]+$/.test(clientId)) {
+            setStatus('error', 'The client ID holds only letters, digits and underscores.');
+            return;
+        }
+
+        /* An empty secret box keeps the stored secret, which works only for
+         * the client ID that is already stored. The page never reads a
+         * secret back. */
+        var sameClient = clientId === stored.client_id;
+        var secret = clientSecret || (sameClient ? stored.legacySecret : '');
+        if (!secret && !sameClient) {
+            setStatus('error', 'Enter the client secret of ' + clientId + '.');
+            return;
+        }
+
         setStatus('warn', 'Saving...');
 
-        /* An empty secret box means "keep the stored secret", so read the
-         * current value first. */
-        request('GET', PASSWORDS_PATH + '/' + CONFIG_ENTRY).then(function (result) {
-            var stored = {};
-            if (result.ok) {
-                try { stored = JSON.parse(result.data.entry[0].content.clear_password); }
-                catch (error) { stored = {}; }
-            }
-            var secret = clientSecret || stored.client_secret;
-            if (!secret) {
-                setStatus('error', 'Enter the client secret.');
-                return null;
-            }
-            var value = JSON.stringify({
-                base_url: baseUrl, client_id: clientId, client_secret: secret
-            });
-            return writeSecret(CONFIG_ENTRY, 'config', value).then(function () {
-                /* New credentials make the cached token pair useless. */
-                return request('DELETE', PASSWORDS_PATH + '/' + TOKEN_CACHE_ENTRY);
+        /* Write the secret before the config, so the config never names a
+         * client ID without a secret. A new secret drops the cached token of
+         * that client. */
+        var steps = Promise.resolve();
+        if (secret) {
+            steps = steps.then(function () {
+                return writeSecret('secret_' + clientId, secret);
             }).then(function () {
-                element('adversarial-client-secret').value = '';
-                setStatus('ok', 'The settings are saved. Splunk keeps the secret encrypted.');
+                return deleteSecret('token_' + clientId);
             });
+        }
+        steps.then(function () {
+            return writeSecret('config', JSON.stringify({ base_url: baseUrl, client_id: clientId }));
+        }).then(function () {
+            /* Version 1.0 kept one token pair for every service account. */
+            return deleteSecret('token_cache');
+        }).then(function () {
+            stored = { base_url: baseUrl, client_id: clientId };
+            element('adversarial-client-secret').value = '';
+            setStatus('ok', 'The settings are saved. Splunk keeps the secret encrypted.');
         }).catch(function (error) {
             setStatus('error', 'Could not save the settings: ' + error);
         });

@@ -109,6 +109,12 @@ def test_the_remediation_fields_reach_the_body():
     assert risk["control_statement"] == "The build image checks."
 
 
+def test_the_tags_reach_the_risk_body():
+    risk = action.build_risk(payload(tags="splunk, posture"))
+    assert risk["tags"] == ["splunk", "posture"]
+    assert "tags" not in action.build_risk(payload())
+
+
 def test_the_action_leaves_the_dates_and_the_threat_objectives_to_the_platform():
     risk = action.build_risk(payload())
     for field in ("due_date", "expected_date", "closed_date", "threat_objectives"):
