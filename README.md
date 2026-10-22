@@ -53,15 +53,24 @@ from the record.
 | Incident | Severity |
 | Risk | Likelihood, Impact |
 
+A score setting takes one of these values:
+
+| Value | Result | Settings |
+| --- | --- | --- |
+| Empty | The field stays empty, and AI Suggest Score in the platform proposes the score from the title, the description and the comments. This is the default. | Severity, Likelihood, Impact |
+| `auto` | The severity of the Splunk alert maps to a value. See the table after this one. An ad-hoc `sendalert` search has no alert severity, so the field stays empty. | Severity, Initially reported urgency |
+| A named value, for example `SEV-2` or `High` | The value goes to the platform as it is. | All |
+
 Set a score field only when the alert holds a value that you trust more than
 the platform. A brute force detection is an example: the number of failed
 logins is a reliable signal, so the example alert maps the Splunk alert
 severity.
 
 A risk holds one more field, **Initially reported urgency**. It is the raw
-score of the reporting source.
- 
-The value `auto` maps the severity of the Splunk alert.
+score of the reporting source, and AI Suggest Score reads it when the title
+and the description hold too little detail.
+
+The value `auto` maps the severity of the Splunk alert:
 
 | Splunk alert severity | Incident severity | Risk initially reported urgency |
 | --- | --- | --- |
@@ -80,6 +89,18 @@ The default view of the Risk Register filters on the urgency. A new risk with
 no score therefore does not show in that view. Clear the filter, or use a view
 with no urgency filter, to see the risks that need a score.
 
+**Field reference**
+
+The Adversarial documentation defines each score value, and explains how AI
+Suggest Score works:
+
+- [Incident fields](https://docs.adversarial.com/guides/incidents/incident-fields/):
+  severity levels SEV-1 to SEV-5, severity reasoning, and AI Suggest Score for
+  incidents.
+- [Risk fields](https://docs.adversarial.com/guides/risks/risk-fields/):
+  likelihood, impact, urgency, initially reported urgency, the SLA and the due
+  date, and AI Suggest Score for risks.
+
 ## Demo
 
 `DEMO.md` holds the steps for a demo on a workstation, and a command line demo
@@ -93,6 +114,10 @@ script with scenarios for each part of the feature.
   - **Incident Editor** to create incidents.
   - **Risk Editor** to create risks.
   - Both roles, or **Editor**, to use both actions.
+
+  [API access](https://docs.adversarial.com/guides/service-accounts/api-access/)
+  in the Adversarial documentation explains service accounts, their roles and
+  their IP allowlist.
 - Network access from the Splunk server to your Adversarial API.
 
 The app uses only the Python standard library. You do not install packages.
@@ -213,7 +238,7 @@ field of the first search result.
 | --- | --- |
 | Title | The incident title. Default: `Splunk alert: $name$` |
 | Description | Text at the start of the incident description |
-| Severity | `auto`, or one of SEV-1 to SEV-5 |
+| Severity | Empty, `auto`, or one of SEV-1 to SEV-5. See "Scoring". |
 | Severity reason | Why the severity is correct |
 | Status | New, In Progress or Review |
 | Source | The incident source. See "Source names" after the tables. |
@@ -231,9 +256,9 @@ field of the first search result.
 | Source | The risk source. See "Source names" after the tables. |
 | Tags | Item tags, with a comma between tags. See "Tags" after the tables. |
 | Status | New, Urgency Proposed or Remediation |
-| Initially reported urgency | Empty, `auto`, or one of Critical, High, Medium, Low, Info |
-| Likelihood | One of Remote, Unlikely, Possible, Probable, Imminent |
-| Impact | One of Very Low, Low, Medium, High, Severe |
+| Initially reported urgency | Empty, `auto`, or one of Critical, High, Medium, Low, Info. See "Scoring". |
+| Likelihood | Empty, or one of Remote, Unlikely, Possible, Probable, Imminent. See "Scoring". |
+| Impact | Empty, or one of Very Low, Low, Medium, High, Severe. See "Scoring". |
 | Likelihood reason | Why the likelihood is correct |
 | Impact reason | Why the impact is correct |
 | Remediation task | What a person must do to close the risk |
