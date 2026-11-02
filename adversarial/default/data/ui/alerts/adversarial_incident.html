@@ -1,7 +1,7 @@
 <!--
   Alert form for the `adversarial_incident` alert action.
 
-  Splunk shows this form under "Add Actions" when a user builds an alert. Each
+  Splunk shows this form under "Add trigger actions" when a user builds an alert. Each
   input name maps to a parameter that the script reads:
   action.adversarial_incident.param.<name>
 -->
@@ -13,7 +13,8 @@
             <span class="help-block">
                 The incident title. The field accepts alert tokens, for example
                 <code>$name$</code> for the alert name or <code>$result.host$</code>
-                for a field of the first result.
+                for a field of the first result row. With "One incident per result row",
+                use <code>&#123;&#123;row.host&#125;&#125;</code> for a field of each row.
                 <a href="{{SPLUNKWEB_URL_PREFIX}}/help?location=learnmore.alert.action.tokens"
                    target="_blank" title="Splunk help">Learn more <i class="icon-external"></i></a>
             </span>
@@ -38,7 +39,7 @@
         <label class="control-label">Severity</label>
         <div class="controls">
             <select name="action.adversarial_incident.param.severity">
-                <option value="">Leave empty for AI Suggest Score</option>
+                <option value="">Leave empty, to score in the platform</option>
                 <option value="auto">From the alert severity</option>
                 <option value="SEV-1">SEV-1 (highest)</option>
                 <option value="SEV-2">SEV-2</option>
@@ -47,8 +48,9 @@
                 <option value="SEV-5">SEV-5 (lowest)</option>
             </select>
             <span class="help-block">
-                An empty severity lets the platform score the incident from the
-                title, the description and the comments.
+                An empty severity stays empty until a person scores the incident in
+                the platform, for example with AI Suggest Score. AI Suggest Score
+                reads the title, the description and the comments.
                 "From the alert severity" maps the Splunk severity of this alert:
                 debug and info give SEV-5, warn gives SEV-4, error gives SEV-3,
                 severe gives SEV-2, and fatal gives SEV-1.
@@ -57,11 +59,11 @@
     </div>
 
     <div class="control-group" style="clear: both;">
-        <label class="control-label" for="adversarial_reasoning">Severity reason</label>
+        <label class="control-label" for="adversarial_reasoning">Severity reasoning</label>
         <div class="controls">
             <input type="text" name="action.adversarial_incident.param.severity_reasoning"
                    id="adversarial_reasoning" placeholder="Optional" />
-            <span class="help-block">Why this severity applies. The platform shows it next to the score.</span>
+            <span class="help-block">Why this severity applies. The platform stores it with the score.</span>
         </div>
     </div>
     <br clear="both" />
@@ -111,9 +113,44 @@
             <input type="text" name="action.adversarial_incident.param.fields"
                    id="adversarial_fields" placeholder="host,source,sourcetype" />
             <span class="help-block">
-                Fields from the first search result to add to the description.
+                Fields from the search result to add to the description.
                 Use a comma-separated list. A name can hold a wildcard, for example
                 <code>src_*</code>.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Incidents to create</label>
+        <div class="controls">
+            <select name="action.adversarial_incident.param.records">
+                <option value="one">One incident per alert</option>
+                <option value="each">One incident per result row</option>
+            </select>
+            <span class="help-block">
+                <b>Per alert:</b> one incident from the first result row. Combine the
+                rows with <code>stats</code>, or <code>sort</code> the key row first.
+                <br />
+                <b>Per result row:</b> one incident for each result row, up to Maximum
+                incidents. Use <code>&#123;&#123;row.host&#125;&#125;</code> for a field of
+                each row. <code>$result.host$</code> always reads the first row.
+                <br />
+                With the trigger "For each result", Splunk runs the action one time for
+                each row, so both choices give one incident for each row.
+            </span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label" for="adversarial_max_records">Maximum incidents</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_incident.param.max_records"
+                   id="adversarial_max_records" placeholder="25" />
+            <span class="help-block">
+                For "One incident per result row" only. The limit for one alert
+                trigger. The action skips the rows after the limit and logs a
+                warning. Default: 25.
             </span>
         </div>
     </div>

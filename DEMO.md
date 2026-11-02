@@ -15,9 +15,10 @@ The demo uses both alert actions:
 | A detection counts failed logins for each host. | `adversarial_incident` | One incident for the host with the most failed logins |
 | A posture check counts the endpoints with no agent. | `adversarial_risk` | One risk for the whole gap |
 
-Splunk starts an alert action one time for each alert firing, and it sends the
-first search result. The detection therefore ends with `sort`, and the posture
-search aggregates the hosts into one row.
+The example alerts use the trigger **Once**, so Splunk starts an alert action
+one time for each alert firing, and it sends the first search result. The detection therefore ends with `sort`, and the posture
+search aggregates the hosts into one row. The `each` scenario shows the other
+value of the **Incidents to create** setting: one incident for each result row.
 
 ## What you need
 
@@ -29,19 +30,34 @@ search aggregates the hosts into one row.
 | Python 3.9 or later | for the helper scripts |
 | [uv](https://docs.astral.sh/uv/) | for the tests |
 
+To start the Splunk container, run:
+
+    docker run -d --name so1 -p 8888:8000 \
+        -e SPLUNK_START_ARGS=--accept-license \
+        -e SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com \
+        -e SPLUNK_PASSWORD='your-password' \
+        --add-host host.docker.internal:host-gateway \
+        splunk/splunk:latest
+
+The image has no `arm64` build. On an Apple silicon workstation, add
+`--platform linux/amd64`. Wait until `docker ps` shows the container as
+`healthy`. `SPLUNK_START_ARGS` accepts the Splunk license, and
+`SPLUNK_GENERAL_TERMS` accepts the Splunk General Terms.
+
 ## Step 1 - create a service account
 
 1. Open the Adversarial platform.
-2. Go to **Settings > Team > Service Accounts**.
-3. Select **Create**, and give the account the **Incident Editor** and
+2. Go to **Settings > Team**.
+3. In the **Service Accounts** section, select **Create**, and give the account the **Incident Editor** and
    **Risk Editor** roles. The demo creates both record types, so it needs both.
    The **Editor** role also works.
 4. Copy the client ID and the client secret before you close the dialog. The
    platform shows the secret one time.
 
-To add a role later, select the pencil icon of the service account, add the
-role, and select **Confirm**. The client ID and the client secret do not
-change.
+To add a role later, select the **Edit** icon of the service account, add the
+role, and save. The client ID and the client secret do not change. **Reset
+credentials** in the same dialog makes a new secret. See
+[Service accounts](https://docs.adversarial.com/guides/service-accounts/).
 
 ## Step 2 - write the .env file
 
@@ -94,8 +110,8 @@ line shows the name of the service account.
 The restart ends the Splunk Web sessions. Sign in again before you open the
 app.
 
-Splunk keeps the client secret encrypted in the secret store. The secret is
-never written to a configuration file.
+Splunk encrypts the client secret in the secret store, in
+`local/passwords.conf` of the app. No setting holds it in plain text.
 
 ## Step 5 - load the sample data
 
@@ -128,7 +144,8 @@ record that the Adversarial API holds.
 | --- | --- |
 | `connect` | The client credentials grant. The identity of the service account. The list of valid incident sources and risk sources. |
 | `adhoc` | A search creates an incident with `sendalert`. The token cache is empty, so the app uses the client credentials. |
-| `risk` | The same command creates a risk with the second action. The score fields stay empty, so AI Suggest Score assigns them. |
+| `risk` | The same command creates a risk with the second action. The score fields stay empty, for a person to score in the platform. |
+| `each` | A search with three rows creates one incident for each row. `param.max_records=2` stops the run after two incidents. |
 | `cache` | Two processes share one access token, because Splunk keeps it in the secret store. |
 | `refresh` | The app gets a new access token with the refresh token grant. |
 | `detect` | The example detection runs over the indexed data and creates one incident for the host above the threshold. |
@@ -148,10 +165,13 @@ values at the end.
 
 ## Step 7 - look at the result
 
-- Incidents in the platform: <http://localhost:5173/adversarial/incidents>
+- Incidents in the platform: <http://localhost:5173/adversarial/incidents>.
+  The default view shows SEV-1 to SEV-3 only, so clear the filters to see an
+  incident with no severity.
 - Risks in the platform: <http://localhost:5173/adversarial/risks>. Select
-  **Clear all filters**. The default view filters on the urgency, and a new
-  risk has no urgency until it holds a likelihood and an impact.
+  **Clear all filters**. A view that filters on the urgency hides a new risk,
+  because the risk has no urgency until it holds a likelihood and an impact.
+- To score a record, run AI Suggest Score on it in the platform.
 - The app in Splunk: <http://localhost:8888/en-US/app/adversarial>
 - The setup page: **Adversarial > Setup**
 - The example alerts: **Settings > Searches, reports, and alerts**. Set the
@@ -187,7 +207,7 @@ disables it again, so the demo leaves no schedule behind.
 | --- | --- |
 | `dev/install.sh` stops at the credential check | The container cannot reach the API. Test the path with the `curl` command in step 3. Check that the API listens on `0.0.0.0`. |
 | The `detect` or `posture` scenario finds 0 results | The sample events are too old. Run `dev/load_sample_data.sh`. |
-| Exit code 3 in the log | The client ID or the client secret is wrong, or the service account is not active. |
+| Exit code 3 in the log | The client ID or the client secret is wrong, the service account is disabled or expired, or the address of the container is outside the IP allowlist. |
 | Exit code 4 in the log | The source name is not one of the sources of the organization. Run `dev/demo.sh connect` to list them. The risk sources and the incident sources are two separate lists. |
 | Exit code 7, HTTP 403 "Insufficient permissions" | The service account holds no role for that record type. Add **Risk Editor** or **Incident Editor** in step 1. |
 | Exit code 5 in the log | The Splunk server cannot reach the API URL. Check `ADVERSARIAL_BASE_URL_CONTAINER`. |

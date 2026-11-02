@@ -286,12 +286,12 @@ param.severity_reasoning=\"The VPN gateway shows a password spray from one addre
 
 scenario_risk() {
     heading "risk - create a risk from a search" \
-        "The same sendalert command creates a risk with the second action. The score fields stay empty, so AI Suggest Score assigns them."
+        "The same sendalert command creates a risk with the second action. The score fields stay empty, for a person to score in the platform."
 
     local marker="demo-risk-$$"
     step "Run a search that starts the risk action"
     note "The search holds no param.iru, no param.likelihood and no"
-    note "param.impact, so the platform scores the risk."
+    note "param.impact, so the risk arrives with no score."
     send_alert "${marker}" "| makeresults \
 | eval control=\"MFA on the VPN\", exempt_users=48, demo_marker=\"${marker}\" \
 | sendalert ${risk_action} param.title=\"MFA exemption list holds 48 users\" \
@@ -302,6 +302,28 @@ param.fields=\"control,exempt_users\""
     echo
     step "Read the new risk from the Adversarial API"
     newest_risk
+}
+
+scenario_each() {
+    heading "each - one incident for each result" \
+        "With param.records=each, the action reads every row of the search and creates one incident for each row. A {{row.<field>}} token takes the value of that row."
+
+    local marker="demo-each-$$"
+    step "Run a search with three rows that starts the alert action"
+    note "param.max_records=2 limits the run to two incidents. The log names"
+    note "the row that the action leaves out."
+    send_alert "${marker}" "| makeresults count=3 \
+| streamstats count AS n \
+| eval dest=\"gw-0\".n, failed_logins=150-(n*40), user=if(n=1, split(\"alice,bob\", \",\"), \"carol\"), demo_marker=\"${marker}\" \
+| sendalert ${incident_action} param.records=\"each\" param.max_records=\"2\" \
+param.title=\"Brute force on {{row.dest}}\" \
+param.description=\"Splunk counted {{row.failed_logins}} failed logins for {{row.user}}.\" \
+param.source=\"SIEM\" param.fields=\"dest,failed_logins,user\""
+    echo
+    step "Read the two new incidents from the Adversarial API"
+    report latest 2 | sed 's/^/   /'
+    echo
+    newest_incident
 }
 
 scenario_cache() {
@@ -403,8 +425,8 @@ scenario_posture() {
     dispatch_alert "${risk_alert}" "${risk_action}"
     echo
     step "Read the new risk"
-    note "The request holds no likelihood and no impact. The platform assigns"
-    note "them, and it then derives the urgency and the due date."
+    note "The request holds no likelihood and no impact. A person scores the"
+    note "risk, and the platform then derives the urgency and the due date."
     newest_risk
 }
 
@@ -562,7 +584,7 @@ wait_for_scheduled_run() {
 
 # ------------------------------------------------------------------ main ----
 
-SCENARIOS="connect adhoc risk cache refresh detect posture reject invalid"
+SCENARIOS="connect adhoc risk each cache refresh detect posture reject invalid"
 SLOW="schedule"
 
 list_scenarios() {
@@ -570,7 +592,8 @@ list_scenarios() {
 Scenarios:
   connect   Check the connection. Show the service account and the sources.
   adhoc     Create an incident from a search. Cold cache: client credentials.
-  risk      Create a risk from a search. The platform scores it.
+  risk      Create a risk from a search. It arrives with no score.
+  each      Create one incident for each result of a search.
   cache     Share one access token between two processes.
   refresh   Get a new access token with the refresh token grant.
   detect    Run the example detection over indexed data. One incident.

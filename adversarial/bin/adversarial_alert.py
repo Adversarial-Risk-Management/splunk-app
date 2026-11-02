@@ -7,9 +7,10 @@ Two alert actions use this module:
 
 Splunk starts an alert action with `--execute` and writes one JSON payload to
 standard input. The payload holds the alert settings, the first search result,
-and a session key for the Splunk management API. This module reads the payload,
-builds the description, and calls the API. Each action script maps the payload
-to the fields of one record type.
+the path of a file with all the results, and a session key for the Splunk
+management API. This module reads the payload, builds the description, and
+calls the API. Each action script maps the payload to the fields of one record
+type.
 
 Which action to use
 -------------------
@@ -18,16 +19,35 @@ risk is a standing condition: a weakness that the organization must remediate
 over time. A detection search creates an incident. A posture search creates a
 risk.
 
-One alert can use both actions. Splunk starts each action one time for each
-alert firing, and the payload then holds the first result of the search. A
-search that must report more than one row therefore aggregates the rows, or
-sorts them so that the first row is the row that matters.
+One alert can use both actions. With the trigger "Once", Splunk starts each
+action one time for each alert firing, and the payload holds the first result
+of the search. With the trigger "For each result", Splunk starts the action one
+time for each result, and the results file holds only that result.
+
+Records
+-------
+The `param.records` setting ("Incidents to create" or "Risks to create" in the
+alert form) selects how many records one alert
+firing creates:
+
+    one     One record from the first result. This is the default. The search
+            aggregates the rows, or sorts them so that the first row is the
+            row that matters.
+    each    One record for each result. The action reads the results file of
+            the search, and stops after `param.max_records` records.
+
+A text setting can hold a `{{row.<field>}}` token. The action replaces the
+token with the value of the field in the row that gives the record. Splunk
+replaces each `$...$` token before the action starts: `$result.<field>$` always
+from the first result, and an unknown token with an empty string. The row token
+therefore does not use `$`.
 
 Scoring
 -------
-The platform scores a record with the AI Suggest Score feature. It reads the
-title, the description and the comments, so the action always sends a full
-description. The score fields stay empty by default:
+The platform does not score a record that the API creates. A person scores it,
+for example with AI Suggest Score, which reads the title, the description and
+the comments. The action therefore always sends a full description. The score
+fields stay empty by default:
 
     incident    severity                see param.severity
     risk        likelihood and impact   see param.likelihood, param.impact
@@ -42,16 +62,20 @@ Exit codes
 ----------
 0  The record was created.
 2  The alert settings are not valid.
-3  Authentication failed. Check the client ID and the client secret.
+3  Authentication failed. Check the client ID, the client secret, and the IP
+   allowlist of the service account.
 4  The API rejected the request. Check the source name and the tags.
 5  The API was not reachable.
 6  An unexpected error occurred.
 7  The service account lacks a permission, for example `incidents:write` or
-   `tags:read`, or the API refused the address of the Splunk server.
+   `tags:read`, or the API refused a cached token from an address outside the
+   IP allowlist.
 """
 
+import csv
 import datetime
 import fnmatch
+import gzip
 import json
 import re
 import sys
@@ -74,6 +98,18 @@ MAX_DESCRIPTION_CHARS = 6000
 # Show at most this many values of a multi-value search field. A `values()`
 # result can hold hundreds of names, which would fill the description.
 MAX_FIELD_VALUES = 20
+
+# The default limit of records for one alert firing in `each` mode. A search
+# that returns more rows than this is usually wrong, and a flood of records
+# helps nobody.
+DEFAULT_MAX_RECORDS = 25
+
+# The values of `param.records`.
+RECORDS_ONE = "one"
+RECORDS_EACH = "each"
+
+# A `{{row.<field>}}` token in a text setting.
+ROW_TOKEN = re.compile(r"\{\{\s*row\.([^{}\s]+)\s*\}\}")
 
 # The settings that the app needs before it can call the API.
 REQUIRED_SETTINGS = ("base_url", "client_id", "client_secret")
@@ -137,8 +173,8 @@ def splunk_severity(payload):
 
     Splunk supplies the level through the `$alert.severity$` token: 1 debug,
     2 info, 3 warn, 4 error, 5 severe, 6 fatal. An ad-hoc `sendalert` search
-    has no alert severity, so the token stays as it is and the function
-    returns None.
+    has no alert severity, so Splunk replaces the token with an empty string
+    and the function returns None.
     """
     try:
         return int(float(payload["configuration"].get("info_severity")))
@@ -151,7 +187,7 @@ def scored_value(payload, setting, from_alert_severity):
 
     The setting takes three kinds of value:
 
-    empty   The field stays empty, and AI Suggest Score assigns it.
+    empty   The field stays empty, for a person to score in the platform.
     auto    The severity of the Splunk alert maps through
             `from_alert_severity`. An ad-hoc search has no alert severity, so
             the field stays empty.
@@ -165,10 +201,142 @@ def scored_value(payload, setting, from_alert_severity):
     return from_alert_severity.get(splunk_severity(payload))
 
 
+def records_mode(payload):
+    """Return the value of `param.records`: `one` or `each`."""
+    value = (payload["configuration"].get("records") or RECORDS_ONE).strip().lower()
+    return value or RECORDS_ONE
+
+
+def max_records(payload):
+    """Return the limit of records for one alert firing, or None if not valid."""
+    raw = (payload["configuration"].get("max_records") or "").strip()
+    if not raw:
+        return DEFAULT_MAX_RECORDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def multi_value(encoded):
+    """Decode a multi-value cell of a Splunk results file.
+
+    Splunk writes a multi-value field two times: the `<field>` column holds the
+    values with a newline between them, and the `__mv_<field>` column holds
+    each value as `$value$`, with `;` between values and `$$` for a `$` in a
+    value.
+    """
+    values = []
+    current = None
+    index = 0
+    while index < len(encoded):
+        char = encoded[index]
+        if current is None:
+            if char == "$":
+                current = []
+        elif char == "$":
+            if encoded[index + 1:index + 2] == "$":
+                current.append("$")
+                index += 1
+            else:
+                values.append("".join(current))
+                current = None
+        else:
+            current.append(char)
+        index += 1
+    return values
+
+
+def read_results(path):
+    """Read all rows of a Splunk results file. Returns a list of dictionaries.
+
+    The file is a CSV file with gzip compression. A multi-value field becomes a
+    list, like the `result` object of the payload.
+    """
+    rows = []
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
+        for raw in csv.DictReader(handle):
+            row = {}
+            for name, value in raw.items():
+                if name is None or name.startswith("__mv_"):
+                    continue
+                encoded = raw.get("__mv_" + name)
+                row[name] = multi_value(encoded) if encoded else value
+            rows.append(row)
+    return rows
+
+
+def result_rows(payload):
+    """Return the rows that give a record, each with a label for the description.
+
+    In `one` mode, the only row is the first result. In `each` mode, the rows
+    come from the results file, up to the limit. Without a readable results
+    file, the action falls back to the first result and writes a warning.
+    """
+    first = payload.get("result") or {}
+    if records_mode(payload) != RECORDS_EACH:
+        return [(first, "First result")]
+
+    path = payload.get("results_file")
+    try:
+        rows = read_results(path) if path else None
+    except (OSError, csv.Error, UnicodeDecodeError) as error:
+        log("WARN", "Could not read the results file %s: %s" % (path, error))
+        rows = None
+    if rows is None:
+        log("WARN", "The payload holds no results file. The action uses the first result.")
+        rows = [first]
+
+    limit = max_records(payload) or DEFAULT_MAX_RECORDS
+    if len(rows) > limit:
+        log(
+            "WARN",
+            "The search returned %d results. The action creates the first %d "
+            "records. Raise param.max_records (Maximum incidents or Maximum risks in "
+            "the alert form) to create more."
+            % (len(rows), limit),
+        )
+    total = len(rows)
+    rows = rows[:limit]
+    return [(row, "Result %d of %d" % (number, total)) for number, row in enumerate(rows, 1)]
+
+
+def expand_row_tokens(text, row):
+    """Replace each `{{row.<field>}}` token in a text with the field of the row.
+
+    A field that the row does not hold gives an empty string.
+    """
+    if not isinstance(text, str) or "{{" not in text:
+        return text
+
+    def value(match):
+        found = field_value(row.get(match.group(1), ""))
+        return "" if found is None else str(found)
+
+    return ROW_TOKEN.sub(value, text)
+
+
+def row_payload(payload, row, label):
+    """Return a copy of the payload for one row.
+
+    The copy holds the row as its `result`, the label for the description, and
+    the settings with each `{{row.<field>}}` token replaced.
+    """
+    copy = dict(payload)
+    copy["result"] = row
+    copy["result_label"] = label
+    copy["configuration"] = {
+        name: expand_row_tokens(value, row)
+        for name, value in payload["configuration"].items()
+    }
+    return copy
+
+
 def build_description(payload):
     """Build the description from the alert settings and the first result.
 
-    The description is the main input of AI Suggest Score, so it always holds
+    AI Suggest Score reads the description, so it always holds
     the alert context and the fields that the "Fields" setting selects.
     """
     config = payload["configuration"]
@@ -194,7 +362,7 @@ def build_description(payload):
 
     fields = selected_fields(payload)
     if fields:
-        lines = ["First result:"]
+        lines = ["%s:" % payload.get("result_label", "First result")]
         lines += ["- %s: %s" % (name, value) for name, value in fields]
         parts.append("\n".join(lines))
 
@@ -207,7 +375,7 @@ def build_description(payload):
 def build_comment(payload, action, extra=None):
     """Build the follow-up comment that links back to Splunk.
 
-    The platform reads the comments of a record in AI Suggest Score, so the
+    AI Suggest Score reads the comments of a record, so the
     comment holds the alert name as well as the link.
     """
     lines = ["Created by the Splunk alert action `%s`." % action]
@@ -251,7 +419,18 @@ def common_problems(payload):
         return ["The payload has no `configuration` object."]
     if not (payload["configuration"].get("title") or "").strip():
         return ["The `title` setting is empty."]
-    return []
+    problems = []
+    if records_mode(payload) not in (RECORDS_ONE, RECORDS_EACH):
+        problems.append(
+            "The `records` setting is `%s`. Use one of: %s, %s."
+            % (payload["configuration"].get("records"), RECORDS_ONE, RECORDS_EACH)
+        )
+    if max_records(payload) is None:
+        problems.append(
+            "The `max_records` setting is `%s`. Use a number above 0."
+            % payload["configuration"].get("max_records")
+        )
+    return problems
 
 
 def check_choice(payload, setting, valid, allow_auto=False):
@@ -413,6 +592,23 @@ def comment(add, identifier, text):
         log("INFO", "Added the Splunk link as a comment on %s" % identifier)
     except (ApiError, TransportError) as error:
         log("WARN", "Could not add the comment to %s: %s" % (identifier, error))
+
+
+def send_records(payload, kind, create_one):
+    """Create one record for each row that `result_rows` returns.
+
+    `create_one` takes the payload of one row and returns an exit code. The
+    action stops at the first failure, because the next row would fail for the
+    same reason, and returns that code. The records that exist stay.
+    """
+    rows = result_rows(payload)
+    if len(rows) > 1:
+        log("INFO", "Creating one %s for each of %d results" % (kind, len(rows)))
+    for row, label in rows:
+        code = create_one(row_payload(payload, row, label))
+        if code != OK:
+            return code
+    return OK
 
 
 def run(action, send):

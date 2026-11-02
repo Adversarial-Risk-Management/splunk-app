@@ -28,8 +28,8 @@ param.type                type
 param.source              source
 param.status              status
 param.iru                 initially_reported_urgency
-param.likelihood          likelihood, empty for AI Suggest Score
-param.impact              impact, empty for AI Suggest Score
+param.likelihood          likelihood, empty by default
+param.impact              impact, empty by default
 param.likelihood_reason   likelihood_reasoning
 param.impact_reason       impact_reasoning
 param.remediation_task    remediation_task
@@ -38,10 +38,11 @@ param.tags                tags
 (the trigger time)        discovered_date
 
 The platform derives the urgency of a risk from the likelihood and the impact,
-and then the due date from the urgency. Both stay empty by default, so AI
-Suggest Score assigns them. The action does not set the due date, the expected
-date or the threat objectives: the platform owns the dates through the SLA, and
-AI Suggest Score assigns the threat objectives.
+and then the due date from the urgency SLA. The likelihood and the impact stay
+empty by default, until a person scores the risk, for example with AI Suggest
+Score. The action does not set the due date, the expected date or the threat
+objectives: the platform owns the dates through the SLA, and AI Suggest Score
+proposes threat objectives for a risk that has none.
 
 `adversarial_alert.py` holds the code that both actions share, and the exit
 codes. To see the log messages of a run, search:
@@ -145,7 +146,7 @@ def build_comment(payload, risk):
         extra.append("Likelihood: %s. Impact: %s."
                      % (risk.get("likelihood", "empty"), risk.get("impact", "empty")))
     else:
-        extra.append("The likelihood and the impact are empty, for AI Suggest Score.")
+        extra.append("The likelihood and the impact are empty. Score the risk, for example with AI Suggest Score.")
     return alert.build_comment(payload, ACTION, extra)
 
 
@@ -163,7 +164,7 @@ def validate(payload):
 
 
 def send(payload):
-    """Create the risk. Returns an exit code."""
+    """Create the risk, or one risk for each search result. Returns an exit code."""
     problems = validate(payload)
     if problems:
         for problem in problems:
@@ -174,31 +175,35 @@ def send(payload):
     if client is None:
         return code
 
-    risk = build_risk(payload)
-    created, code = alert.submit(client.create_risk, risk, "risk")
-    if created is None:
-        return code
+    def create_one(row_payload):
+        """Create the risk of one search result. Returns an exit code."""
+        risk = build_risk(row_payload)
+        created, code = alert.submit(client.create_risk, risk, "risk")
+        if created is None:
+            return code
 
-    # POST /v1/risks answers with a risk register entry, which holds the risk
-    # in a `risk` object.
-    record = alert.created_record(created, "risk")
-    identifier = record.get("id")
-    if not identifier:
-        alert.log("WARN", "The API answer holds no risk ID: %s" % str(created)[:300])
+        # POST /v1/risks answers with a risk register entry, which holds the risk
+        # in a `risk` object.
+        record = alert.created_record(created, "risk")
+        identifier = record.get("id")
+        if not identifier:
+            alert.log("WARN", "The API answer holds no risk ID: %s" % str(created)[:300])
+            return OK
+        # The urgency and the due date stay empty until the risk holds a likelihood
+        # and an impact. The log names the score, so an operator can see whether
+        # the platform must still assign it.
+        alert.log(
+            "INFO",
+            "Created risk %s with urgency %s. Token source: %s."
+            % (identifier, record.get("urgency") or "not yet assigned", client.token_source),
+        )
+
+        if alert.wants_comment(row_payload):
+            alert.comment(client.add_risk_comment, identifier, build_comment(row_payload, risk))
+
         return OK
-    # The urgency and the due date stay empty until the risk holds a likelihood
-    # and an impact. The log names the score, so an operator can see whether
-    # the platform must still assign it.
-    alert.log(
-        "INFO",
-        "Created risk %s with urgency %s. Token source: %s."
-        % (identifier, record.get("urgency") or "not yet assigned", client.token_source),
-    )
 
-    if alert.wants_comment(payload):
-        alert.comment(client.add_risk_comment, identifier, build_comment(payload, risk))
-
-    return OK
+    return alert.send_records(payload, "risk", create_one)
 
 
 def main():

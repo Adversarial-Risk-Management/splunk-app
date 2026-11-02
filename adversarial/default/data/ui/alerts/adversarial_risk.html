@@ -1,7 +1,7 @@
 <!--
   Alert form for the `adversarial_risk` alert action.
 
-  Splunk shows this form under "Add Actions" when a user builds an alert. Each
+  Splunk shows this form under "Add trigger actions" when a user builds an alert. Each
   input name maps to a parameter that the script reads:
   action.adversarial_risk.param.<name>
 
@@ -17,8 +17,9 @@
             <span class="help-block">
                 The risk title. The field accepts alert tokens, for example
                 <code>$name$</code> for the alert name or <code>$result.hosts$</code>
-                for a field of the first result. The title is a key input of
-                AI Suggest Score.
+                for a field of the first result row. With "One risk per result row",
+                use <code>&#123;&#123;row.host&#125;&#125;</code> for a field of each row. AI Suggest Score reads
+                the title.
                 <a href="{{SPLUNKWEB_URL_PREFIX}}/help?location=learnmore.alert.action.tokens"
                    target="_blank" title="Splunk help">Learn more <i class="icon-external"></i></a>
             </span>
@@ -34,8 +35,8 @@
             <span class="help-block">
                 Optional text for the top of the description. The action always adds
                 the alert name, the trigger time and a link to the search results.
-                The platform reads the description in AI Suggest Score, so name
-                the affected assets and the exposure.
+                AI Suggest Score reads the description, so name the affected assets
+                and the exposure.
             </span>
         </div>
     </div>
@@ -54,7 +55,7 @@
                 <option value="Third-party">Third-party</option>
             </select>
             <span class="help-block">
-                The category of the risk. A missing safeguard is a control
+                The type of the risk. A missing safeguard is a control
                 deficiency. A wrong setting is a configuration risk. A known
                 defect in third-party software is a vulnerability.
             </span>
@@ -114,11 +115,11 @@
                 <option value="Info">Info</option>
             </select>
             <span class="help-block">
-                The raw score of the reporting source, which is the inherent risk.
+                The raw score of the reporting source.
                 "From the alert severity" maps the Splunk severity of this alert:
                 debug and info give Info, warn gives Low, error gives Medium,
                 severe gives High, and fatal gives Critical. AI Suggest Score
-                reads this field when the title and the description hold too
+                uses this field when the title and the description hold too
                 little detail.
             </span>
         </div>
@@ -126,15 +127,15 @@
     <br clear="both" />
 
     <!--
-      The likelihood and the impact give the urgency, and the urgency gives the
-      due date. Both fields stay empty for AI Suggest Score, which reads the
-      title, the description and the comments.
+      The likelihood and the impact give the urgency, and the urgency SLA gives
+      the due date. Both fields stay empty by default, until a person scores the
+      risk in the platform, for example with AI Suggest Score.
     -->
     <div class="control-group">
         <label class="control-label">Likelihood</label>
         <div class="controls">
             <select name="action.adversarial_risk.param.likelihood">
-                <option value="">Leave empty for AI Suggest Score</option>
+                <option value="">Leave empty, to score in the platform</option>
                 <option value="Imminent">Imminent (highest)</option>
                 <option value="Probable">Probable</option>
                 <option value="Possible">Possible</option>
@@ -151,7 +152,7 @@
         <label class="control-label">Impact</label>
         <div class="controls">
             <select name="action.adversarial_risk.param.impact">
-                <option value="">Leave empty for AI Suggest Score</option>
+                <option value="">Leave empty, to score in the platform</option>
                 <option value="Severe">Severe (highest)</option>
                 <option value="High">High</option>
                 <option value="Medium">Medium</option>
@@ -161,14 +162,14 @@
             <span class="help-block">
                 What the risk can cause if an attacker uses it. The platform
                 derives the urgency from the likelihood and the impact, and the
-                due date from the urgency.
+                due date from the urgency SLA.
             </span>
         </div>
     </div>
     <br clear="both" />
 
     <div class="control-group">
-        <label class="control-label" for="adversarial_risk_likelihood_reason">Likelihood reason</label>
+        <label class="control-label" for="adversarial_risk_likelihood_reason">Likelihood reasoning</label>
         <div class="controls">
             <input type="text" name="action.adversarial_risk.param.likelihood_reason"
                    id="adversarial_risk_likelihood_reason" placeholder="Optional" />
@@ -177,7 +178,7 @@
     </div>
 
     <div class="control-group" style="clear: both;">
-        <label class="control-label" for="adversarial_risk_impact_reason">Impact reason</label>
+        <label class="control-label" for="adversarial_risk_impact_reason">Impact reasoning</label>
         <div class="controls">
             <input type="text" name="action.adversarial_risk.param.impact_reason"
                    id="adversarial_risk_impact_reason" placeholder="Optional" />
@@ -218,9 +219,44 @@
             <input type="text" name="action.adversarial_risk.param.fields"
                    id="adversarial_risk_fields" placeholder="host,source,sourcetype" />
             <span class="help-block">
-                Fields from the first search result to add to the description.
+                Fields from the search result to add to the description.
                 Use a comma-separated list. A name can hold a wildcard, for example
                 <code>host_*</code>.
+            </span>
+        </div>
+    </div>
+    <br clear="both" />
+
+    <div class="control-group">
+        <label class="control-label">Risks to create</label>
+        <div class="controls">
+            <select name="action.adversarial_risk.param.records">
+                <option value="one">One risk per alert</option>
+                <option value="each">One risk per result row</option>
+            </select>
+            <span class="help-block">
+                <b>Per alert:</b> one risk from the first result row. Combine the
+                rows with <code>stats</code>, or <code>sort</code> the key row first.
+                <br />
+                <b>Per result row:</b> one risk for each result row, up to Maximum
+                risks. Use <code>&#123;&#123;row.host&#125;&#125;</code> for a field of
+                each row. <code>$result.host$</code> always reads the first row.
+                <br />
+                With the trigger "For each result", Splunk runs the action one time for
+                each row, so both choices give one risk for each row.
+            </span>
+        </div>
+    </div>
+
+    <div class="control-group" style="clear: both;">
+        <label class="control-label" for="adversarial_risk_max_records">Maximum risks</label>
+        <div class="controls">
+            <input type="text" name="action.adversarial_risk.param.max_records"
+                   id="adversarial_risk_max_records" placeholder="25" />
+            <span class="help-block">
+                For "One risk per result row" only. The limit for one alert
+                trigger. The action skips the rows after the limit and logs a
+                warning. Default: 25.
             </span>
         </div>
     </div>
@@ -242,8 +278,8 @@
 
     <!--
       The action does not set the due date, the expected date or the threat
-      objectives. The platform derives the due date from the urgency SLA, and
-      AI Suggest Score assigns the threat objectives.
+      objectives. The platform derives the due date from the urgency SLA. AI
+      Suggest Score proposes threat objectives for a risk that has none.
 
       The API URL and the service account come from the setup page. To change
       them for one alert, set `param.base_url` or `param.client_id` in
