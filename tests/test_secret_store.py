@@ -107,17 +107,6 @@ def test_the_config_entry_holds_no_secret():
     assert rest.read_client_secret("arm_sa_a") == "arm_sk_a"
 
 
-def test_a_secret_from_version_1_0_still_works():
-    fake = FakeSplunkd()
-    fake.entries["adversarial:config:"] = json.dumps(
-        {"base_url": BASE_URL, "client_id": "arm_sa_a", "client_secret": "arm_sk_old"}
-    )
-    rest = rest_for(fake)
-    assert rest.read_client_secret("arm_sa_a") == "arm_sk_old"
-    # The old combined secret belongs only to the client ID next to it.
-    assert rest.read_client_secret("arm_sa_b") is None
-
-
 def test_a_new_secret_drops_the_cached_token_of_that_client():
     fake = FakeSplunkd()
     rest = rest_for(fake)
@@ -130,12 +119,12 @@ def test_a_new_secret_drops_the_cached_token_of_that_client():
     assert SecretStoreTokenCache(rest, "arm_sa_b").load() == {"access_token": "b"}
 
 
-def test_clear_token_caches_removes_every_pair_and_the_old_one():
+def test_clear_token_caches_removes_every_pair():
     fake = FakeSplunkd()
     rest = rest_for(fake)
     rest.write_client_secret("arm_sa_a", "arm_sk_a")
     SecretStoreTokenCache(rest, "arm_sa_a").save({"access_token": "a"})
-    fake.entries["adversarial:token_cache:"] = "{}"
+    SecretStoreTokenCache(rest, "arm_sa_b").save({"access_token": "b"})
 
     assert rest.clear_token_caches() == 2
     assert list(fake.entries) == ["adversarial:secret_arm_sa_a:"]
@@ -167,7 +156,7 @@ def test_an_overriding_client_id_uses_its_own_secret(splunkd):
 
 
 def test_an_overriding_client_id_without_a_secret_fails_validation(splunkd, client):
-    """Version 1.0 paired the override with the secret of the default account."""
+    """An override never uses the secret of the default account."""
     store_default(splunkd)
     adversarial_incident = __import__("adversarial_incident")
 
@@ -195,9 +184,8 @@ def options(*argv):
     return configure_credentials.parse_arguments(list(argv) + ["--splunk-password", "x"])
 
 
-def test_the_script_stores_the_default_account_without_a_combined_secret():
+def test_the_script_stores_the_default_account_and_its_secret_apart():
     fake = FakeSplunkd()
-    fake.entries["adversarial:token_cache:"] = "{}"
     rest = rest_for(fake)
     code = configure_credentials.run(rest, options(
         "--base-url", BASE_URL, "--client-id", "arm_sa_a", "--client-secret", "arm_sk_a"))
@@ -205,7 +193,6 @@ def test_the_script_stores_the_default_account_without_a_combined_secret():
     assert code == 0
     assert "client_secret" not in json.loads(fake.entries["adversarial:config:"])
     assert fake.entries["adversarial:secret_arm_sa_a:"] == "arm_sk_a"
-    assert "adversarial:token_cache:" not in fake.entries
 
 
 def test_the_script_marks_the_app_configured():

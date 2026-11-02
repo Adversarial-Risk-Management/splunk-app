@@ -31,8 +31,6 @@ SECRET_REALM = "adversarial"
 CONFIG_USERNAME = "config"
 SECRET_PREFIX = "secret_"
 TOKEN_PREFIX = "token_"
-# Version 1.0 of the app kept one token pair for every service account here.
-LEGACY_TOKEN_CACHE_USERNAME = "token_cache"
 
 
 def secret_username(client_id):
@@ -172,12 +170,7 @@ class SplunkRest:
     # -- App configuration ------------------------------------------------
 
     def read_config(self):
-        """Return the stored API URL and default client ID as a dictionary.
-
-        Version 1.0 of the app also kept the client secret in this entry. The
-        method still returns it, so an install that has not saved its settings
-        again keeps working.
-        """
+        """Return the stored API URL and default client ID as a dictionary."""
         raw = self.read_secret(CONFIG_USERNAME)
         if not raw:
             return {}
@@ -194,14 +187,7 @@ class SplunkRest:
 
     def read_client_secret(self, client_id):
         """Return the stored secret of one service account, or None."""
-        secret = self.read_secret(secret_username(client_id))
-        if secret:
-            return secret
-        # Version 1.0 kept the secret of the default account in `config`.
-        legacy = self.read_config()
-        if legacy.get("client_id") == client_id:
-            return legacy.get("client_secret") or None
-        return None
+        return self.read_secret(secret_username(client_id)) or None
 
     def write_client_secret(self, client_id, client_secret):
         """Store the secret of one service account and drop its cached token.
@@ -230,7 +216,7 @@ class SplunkRest:
         names = [
             name
             for name in self.list_usernames()
-            if name.startswith(TOKEN_PREFIX) or name == LEGACY_TOKEN_CACHE_USERNAME
+            if name.startswith(TOKEN_PREFIX)
         ]
         for name in names:
             self.delete_secret(name)

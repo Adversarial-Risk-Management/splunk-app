@@ -44,7 +44,7 @@ import os
 import sys
 
 from adversarial_api import AdversarialClient, ApiError, TransportError
-from splunk_rest import LEGACY_TOKEN_CACHE_USERNAME, SplunkRest, SplunkRestError
+from splunk_rest import SplunkRest, SplunkRestError
 
 DEFAULT_MANAGEMENT_URI = "https://localhost:8089"
 
@@ -118,11 +118,8 @@ def show(rest):
     stored = rest.stored_client_ids()
     print("base_url:        %s" % config.get("base_url"))
     print("default client:  %s" % default)
-    if "client_secret" in config:
-        print("warning:         the secret sits in the old combined entry. Store the "
-              "settings again to move it out.")
     print("stored secrets:  %s" % (", ".join(stored) or "(none)"))
-    if default and default not in stored and "client_secret" not in config:
+    if default and default not in stored:
         print("warning:         the default client has no stored secret.")
     tokens = [name for name in rest.list_usernames() if name.startswith("token_")]
     print("token caches:    %d" % len(tokens))
@@ -213,8 +210,6 @@ def store(rest, options):
               % options.client_id)
         return 0
     rest.write_config(options.base_url, options.client_id)
-    # Version 1.0 kept one token pair for every service account.
-    rest.delete_secret(LEGACY_TOKEN_CACHE_USERNAME)
     rest.mark_configured()
     print("The settings are stored. Default client ID: %s" % options.client_id)
     return 0

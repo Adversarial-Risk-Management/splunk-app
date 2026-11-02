@@ -240,9 +240,7 @@ The app keeps these entries in the secret store, in the realm `adversarial`:
 | `token_<client ID>` | The cached token pair of one service account. |
 
 The setup page reads only `config`, so the client secret never reaches the
-browser. An install of version 1.0 kept the secret inside `config`. The app
-still reads it there, and the next save on the setup page, or with
-`configure_credentials.py`, moves it into its own entry.
+browser.
 
 Only the `admin` and `sc_admin` roles can read or change these entries. To let
 the alerts of another role use the actions, give that role the

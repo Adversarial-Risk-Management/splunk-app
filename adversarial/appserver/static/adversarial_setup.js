@@ -83,8 +83,7 @@
     }
 
     /* Show what is stored, so an administrator can confirm the state. The
-     * `config` entry holds no secret. An install from version 1.0 still keeps
-     * the secret there until the settings are saved again. */
+     * `config` entry holds no secret. */
     function load() {
         return request('GET', PASSWORDS_PATH + '/' + CONFIG_ENTRY).then(function (result) {
             if (result.status === 404) {
@@ -104,14 +103,8 @@
             }
             element('adversarial-base-url').value = stored.base_url || '';
             element('adversarial-client-id').value = stored.client_id || '';
-            var note = stored.client_secret ?
-                ' Click Save once to move the secret into its own encrypted entry.' :
-                ' Leave the secret empty to keep the stored secret.';
             setStatus('ok', 'The app is set up. Client ID: ' + (stored.client_id || 'unknown') +
-                '.' + note);
-            /* Forget the old combined secret as soon as the page has seen it. */
-            stored.legacySecret = stored.client_secret;
-            delete stored.client_secret;
+                '. Leave the secret empty to keep the stored secret.');
         }).catch(function (error) {
             setStatus('error', 'Could not reach the Splunk management API: ' + error);
         });
@@ -165,8 +158,7 @@
          * the client ID that is already stored. The page never reads a
          * secret back. */
         var sameClient = clientId === stored.client_id;
-        var secret = clientSecret || (sameClient ? stored.legacySecret : '');
-        if (!secret && !sameClient) {
+        if (!clientSecret && !sameClient) {
             setStatus('error', 'Enter the client secret of ' + clientId + '.');
             return;
         }
@@ -177,18 +169,15 @@
          * client ID without a secret. A new secret drops the cached token of
          * that client. */
         var steps = Promise.resolve();
-        if (secret) {
+        if (clientSecret) {
             steps = steps.then(function () {
-                return writeSecret('secret_' + clientId, secret);
+                return writeSecret('secret_' + clientId, clientSecret);
             }).then(function () {
                 return deleteSecret('token_' + clientId);
             });
         }
         steps.then(function () {
             return writeSecret('config', JSON.stringify({ base_url: baseUrl, client_id: clientId }));
-        }).then(function () {
-            /* Version 1.0 kept one token pair for every service account. */
-            return deleteSecret('token_cache');
         }).then(function () {
             /* Splunk stops opening this page when a user opens the app. */
             return request('POST', APP_PATH, { configured: '1' }).then(function (result) {

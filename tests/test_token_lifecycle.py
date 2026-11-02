@@ -173,7 +173,7 @@ def test_force_new_ignores_a_fresh_cached_token():
     [
         {"base_url": BASE_URL, "client_id": "arm_sa_other_org"},
         {"base_url": "https://api.other.test/api", "client_id": CLIENT_ID},
-        # Version 1.0 of the app cached a pair without its identity.
+        # A pair with no recorded identity.
         {},
     ],
     ids=["other-client", "other-api", "no-identity"],

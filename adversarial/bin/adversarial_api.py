@@ -161,8 +161,8 @@ class AdversarialClient:
     def _belongs_here(self, cached):
         """Whether a cached pair was issued to this API URL and client ID.
 
-        A pair from another identity, or a pair from an older version of the
-        app that does not record its identity, is not used.
+        A pair from another identity, or a pair with no recorded identity, is
+        not used.
         """
         return (
             cached.get("base_url") == self.base_url
