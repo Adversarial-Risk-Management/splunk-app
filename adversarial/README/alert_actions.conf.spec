@@ -2,7 +2,7 @@
 # Settings of the Adversarial alert actions.
 #
 # Splunk reads this file to validate the settings of the app. Without it,
-# `splunk btool check` reports each `param.*` setting as an unknown key.
+# `splunk btool check` reports each `param.*` setting as an invalid key.
 #
 
 [adversarial_incident]
@@ -24,7 +24,7 @@ param.client_id = <string>
 * Default: empty
 
 param.title = <string>
-* The title of the incident. The title is a key input of AI Suggest Score.
+* The title of the incident. AI Suggest Score reads the title.
 * Default: Splunk alert: $name$
 
 param.description = <string>
@@ -35,7 +35,8 @@ param.description = <string>
 param.severity = <string>
 * The severity of the incident: empty, auto, SEV-1, SEV-2, SEV-3, SEV-4 or
   SEV-5.
-* Empty leaves the severity for AI Suggest Score.
+* Empty leaves the severity empty. A person scores the incident in the
+  platform, for example with AI Suggest Score.
 * `auto` maps the severity of the Splunk alert to an Adversarial severity.
 * Default: empty
 
@@ -59,7 +60,7 @@ param.tags = <string>
 * Default: empty
 
 param.fields = <string>
-* Field names from the first search result, with a comma between names. The
+* Field names from the search result, with a comma between names. The
   alert action adds each field to the description. A name can hold a wildcard,
   for example src_*.
 * Default: host,source,sourcetype
@@ -67,6 +68,28 @@ param.fields = <string>
 param.add_comment = <boolean>
 * Whether the alert action adds a comment with a link to the search results.
 * Default: 1
+
+param.records = <string>
+* How many records one alert firing creates: one or each.
+* one creates one record from the first search result.
+* each creates one record for each search result, up to param.max_records.
+  The action reads the results file of the search.
+* A text setting can hold a {{row.<field>}} token. The action replaces it
+  with the field of the row that gives the record. Splunk replaces a
+  $result.<field>$ token from the first result only, so use {{row.<field>}}
+  with each.
+* A scheduled alert with the trigger "For each result"
+  (alert.digest_mode = 0) starts the action one time for each result. Each
+  start then gets one row, so one and each give the same records.
+* Default: one
+
+param.max_records = <integer>
+* The maximum number of records for one alert firing when param.records is
+  each. The action creates records for the first rows, and writes a warning
+  for the rest.
+* 0 means no limit. Splunk still stops the action after maxtime, and the API
+  limits the request rate of the service account.
+* Default: 25
 
 param.info_severity = <string>
 * The severity of the Splunk alert. Splunk supplies this value through the
@@ -96,7 +119,7 @@ param.client_id = <string>
 * Default: empty
 
 param.title = <string>
-* The title of the risk. The title is a key input of AI Suggest Score.
+* The title of the risk. AI Suggest Score reads the title.
 * Default: Splunk alert: $name$
 
 param.description = <string>
@@ -105,7 +128,7 @@ param.description = <string>
 * Default: empty
 
 param.type = <string>
-* The category of the risk: Code, Configuration, Control Deficiency, Policy,
+* The type of the risk: Code, Configuration, Control Deficiency, Policy,
   Procedural, Vulnerability or Third-party.
 * Empty gives Control Deficiency.
 * Default: Control Deficiency
@@ -128,9 +151,9 @@ param.status = <string>
 * Default: New
 
 param.iru = <string>
-* The initially reported urgency: empty, auto, Critical, High, Medium, Low or
+* The Initially Reported Urgency (IRU): empty, auto, Critical, High, Medium, Low or
   Info.
-* The field holds the raw score of the reporting source. AI Suggest Score reads
+* The field holds the raw score of the reporting source. AI Suggest Score uses
   it when the title and the description hold too little detail.
 * `auto` maps the severity of the Splunk alert.
 * Default: empty
@@ -138,14 +161,14 @@ param.iru = <string>
 param.likelihood = <string>
 * The likelihood of the risk: empty, Remote, Unlikely, Possible, Probable or
   Imminent.
-* Empty leaves the likelihood for AI Suggest Score.
+* Empty leaves the likelihood empty, for a person to score.
 * Default: empty
 
 param.impact = <string>
 * The impact of the risk: empty, Very Low, Low, Medium, High or Severe.
-* Empty leaves the impact for AI Suggest Score.
-* The platform derives the urgency from the likelihood and the impact, and the
-  due date from the urgency.
+* Empty leaves the impact empty, for a person to score.
+* The platform derives the urgency from the likelihood and the impact. The due
+  date is the discovered date plus the SLA of the urgency.
 * Default: empty
 
 param.likelihood_reason = <string>
@@ -157,7 +180,7 @@ param.impact_reason = <string>
 * Default: empty
 
 param.remediation_task = <string>
-* The actions that address the risk. The audience is the wider organization.
+* The actions that address the risk.
 * Default: empty
 
 param.control_statement = <string>
@@ -165,7 +188,7 @@ param.control_statement = <string>
 * Default: empty
 
 param.fields = <string>
-* Field names from the first search result, with a comma between names. The
+* Field names from the search result, with a comma between names. The
   alert action adds each field to the description. A name can hold a wildcard,
   for example src_*.
 * Default: host,source,sourcetype
@@ -173,6 +196,28 @@ param.fields = <string>
 param.add_comment = <boolean>
 * Whether the alert action adds a comment with a link to the search results.
 * Default: 1
+
+param.records = <string>
+* How many records one alert firing creates: one or each.
+* one creates one record from the first search result.
+* each creates one record for each search result, up to param.max_records.
+  The action reads the results file of the search.
+* A text setting can hold a {{row.<field>}} token. The action replaces it
+  with the field of the row that gives the record. Splunk replaces a
+  $result.<field>$ token from the first result only, so use {{row.<field>}}
+  with each.
+* A scheduled alert with the trigger "For each result"
+  (alert.digest_mode = 0) starts the action one time for each result. Each
+  start then gets one row, so one and each give the same records.
+* Default: one
+
+param.max_records = <integer>
+* The maximum number of records for one alert firing when param.records is
+  each. The action creates records for the first rows, and writes a warning
+  for the rest.
+* 0 means no limit. Splunk still stops the action after maxtime, and the API
+  limits the request rate of the service account.
+* Default: 25
 
 param.info_severity = <string>
 * The severity of the Splunk alert. Splunk supplies this value through the

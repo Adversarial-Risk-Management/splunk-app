@@ -217,8 +217,8 @@ def command_show_risk(access_token, arguments):
     print("source              : %s" % row.get("source"))
     print("initially reported  : %s" % (row.get("initially_reported_urgency") or "-"))
     # The platform derives the urgency from the likelihood and the impact, and
-    # the due date from the urgency. All three stay empty until somebody, or AI
-    # Suggest Score, assigns a score.
+    # the due date from the urgency. All three stay empty until a person scores
+    # the risk, for example with AI Suggest Score.
     print("likelihood          : %s" % (row.get("likelihood") or "-"))
     print("impact              : %s" % (row.get("impact") or "-"))
     print("urgency             : %s" % (row.get("urgency") or "-"))

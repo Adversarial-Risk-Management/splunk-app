@@ -1,7 +1,10 @@
 # Adversarial for Splunk
 
-This Splunk app adds two custom alert actions. An alert action creates a record
-in the Adversarial platform when a Splunk alert triggers.
+This Splunk app adds two
+[custom alert actions](https://dev.splunk.com/enterprise/docs/devtools/customalertactions/).
+An alert action creates a record in the Adversarial platform when a Splunk
+alert triggers. Install the app on the search heads, because the search tier
+runs alert actions.
 
 | Alert action | Record |
 | --- | --- |
@@ -30,11 +33,24 @@ host with too many failed logins.
 A risk is one condition. A posture search aggregates the rows into one row,
 because the whole condition is one risk.
 
-## One alert firing, one record
+## One record, or one record for each result
 
-Splunk starts a custom alert action one time for each alert firing, and it
-sends the first search result to it. It does not start the action one time for
-each result. Write the search for that behaviour:
+The **Incidents to create** and **Risks to create** settings (`param.records`)
+select how many records one alert firing creates.
+
+| Value | Result |
+| --- | --- |
+| `one` (form: **One incident per alert**) | One record from the first row of the search results. This is the default. |
+| `each` (form: **One incident per result row**) | One record for each row of the search results, up to **Maximum incidents** or **Maximum risks** (`param.max_records`, default 25, `0` for no limit). |
+
+Splunk can also start the action one time for each result. See "The Splunk
+trigger" at the end of this section.
+
+**One record from the first result**
+
+With the trigger **Once**, Splunk starts a custom alert action one time for
+each alert firing, and it sends the first search result to it. Write the search
+for that behaviour:
 
 - Aggregate the rows if the whole result set is one record. A `stats` command
   with `values()` gives one row that names every asset.
@@ -42,6 +58,50 @@ each result. Write the search for that behaviour:
   the record, so `| sort - failed_logins` reports the worst host.
 - Name the fields of that row in the **Fields** setting. The description then
   holds the values.
+
+**One record for each result**
+
+The action reads the results file of the search, and creates one record for
+each row. Use this value when each row is a separate event or condition, for
+example one incident for each host above a threshold.
+
+- Use a `{{row.<field>}}` token in a text setting, for example
+  `Brute force on {{row.dest}}`. The action replaces the token with the field
+  of the row that gives the record. Splunk replaces a `$result.<field>$` token
+  before the action starts, always from the first result, so that token gives
+  the same value in every record. Splunk replaces an unknown `$...$` token
+  with an empty string, so the row token does not use `$`.
+- The description names the row, for example `Result 2 of 5`.
+- **Maximum incidents** or **Maximum risks** limits the records of one alert
+  firing. The action creates records for the first rows and writes a warning
+  for the other rows. Sort the search, so the rows that matter come first.
+  Set `0` for no limit. Splunk still stops the action after `maxtime`
+  (default 5 minutes), and the API limits the request rate of a service
+  account. Each record takes two requests: the record and the comment.
+- The action stops at the first failure. The records that it created before
+  the failure stay.
+- Use **Throttle** in the alert to stop a repeat. With the trigger **Once**,
+  Splunk throttles the whole alert.
+
+**The Splunk trigger**
+
+A scheduled alert has a second way to get one record for each result: set the
+trigger of the alert to **For each result** (`alert.digest_mode = 0`). Splunk
+then starts the action one time for each row, and `$result.<field>$` takes the
+value of that row. This trigger also gives **Throttle** by field value, for example
+one record for each `dest` in 24 hours.
+
+| | Trigger **For each result** | **One incident per result row** |
+| --- | --- | --- |
+| Scheduled alert | Yes | Yes |
+| Manual run, `sendalert` search | No, Splunk does not start the action | Yes |
+| Limit of records for one firing | No | **Maximum incidents**, **Maximum risks** |
+| Throttle by field value | Yes | No |
+| Starts of the action | One for each row | One |
+
+Each start of the action with the trigger **For each result** gets a results
+file that holds only its own row. The two ways therefore do not multiply: with
+both, a run gives one record for each row.
 
 The comment holds a link to the search results, so a person reaches every row
 from the record.
@@ -57,49 +117,63 @@ A score setting takes one of these values:
 
 | Value | Result | Settings |
 | --- | --- | --- |
-| Empty | The field stays empty, and AI Suggest Score in the platform proposes the score from the title, the description and the comments. This is the default. | Severity, Likelihood, Impact |
+| Empty | The field stays empty. A person scores the record in the platform, for example with AI Suggest Score. This is the default. | Severity, Likelihood, Impact |
 | `auto` | The severity of the Splunk alert maps to a value. See the table after this one. An ad-hoc `sendalert` search has no alert severity, so the field stays empty. | Severity, Initially reported urgency |
 | A named value, for example `SEV-2` or `High` | The value goes to the platform as it is. | All |
 
-Set a score field only when the alert holds a value that you trust more than
-the platform. A brute force detection is an example: the number of failed
-logins is a reliable signal, so the example alert maps the Splunk alert
-severity.
+The platform does not score a record that the API creates. A person runs AI
+Suggest Score on one record or on many records, and accepts or changes the
+proposed values. AI Suggest Score reads the title, the description and the
+comments, so the action always sends a full description and adds a comment.
+For a risk, it also reads the Initially Reported Urgency (IRU) and your Risk
+Assessment Management Procedure (RAMP). For an incident, it also reads your
+Cyber Incident Response Procedure (CIRP) and your Cybersecurity Policy.
 
-A risk holds one more field, **Initially reported urgency**. It is the raw
-score of the reporting source, and AI Suggest Score reads it when the title
+Set a score field only when the alert holds a value that you trust. A brute
+force detection is an example: the number of failed logins is a reliable
+signal, so the example alert maps the Splunk alert severity.
+
+A risk holds one more field, the **Initially Reported Urgency (IRU)**. It is
+the raw score of the reporting source. AI Suggest Score uses it when the title
 and the description hold too little detail.
 
 The value `auto` maps the severity of the Splunk alert:
 
 | Splunk alert severity | Incident severity | Risk initially reported urgency |
 | --- | --- | --- |
-| 1 (Debug) | SEV-5 | Info |
-| 2 (Info) | SEV-5 | Info |
-| 3 (Warning) | SEV-4 | Low |
-| 4 (Error) | SEV-3 | Medium |
-| 5 (Severe) | SEV-2 | High |
-| 6 (Fatal) | SEV-1 | Critical |
+| 1 (debug) | SEV-5 | Info |
+| 2 (info) | SEV-5 | Info |
+| 3 (warn) | SEV-4 | Low |
+| 4 (error) | SEV-3 | Medium |
+| 5 (severe) | SEV-2 | High |
+| 6 (fatal) | SEV-1 | Critical |
 
-The platform derives the urgency of a risk from the likelihood and the impact,
-and the due date from the urgency. The urgency and the due date therefore stay
-empty until the risk holds a likelihood and an impact.
+The names are the `alert.severity` values of
+[savedsearches.conf](https://help.splunk.com/en/splunk-enterprise/administer/admin-manual/10.0/configuration-file-reference/10.0.10-configuration-file-reference/savedsearches.conf).
 
-The default view of the Risk Register filters on the urgency. A new risk with
-no score therefore does not show in that view. Clear the filter, or use a view
-with no urgency filter, to see the risks that need a score.
+The platform derives the urgency of a risk from the likelihood and the impact.
+The due date is the discovered date plus the SLA of that urgency, and a risk
+with the urgency Info has no due date. The urgency and the due date therefore
+stay empty until the risk holds a likelihood and an impact.
+
+A register view can hide a record with no score. The default view of the
+Incident Register shows open incidents at SEV-1 to SEV-3 only, so a new
+incident with no severity does not show there. A risk view with an urgency
+filter does not show a risk with no urgency. Use a view with no score filter to
+find the records that need a score.
 
 **Field reference**
 
-The Adversarial documentation defines each score value, and explains how AI
-Suggest Score works:
+The Adversarial documentation defines each value:
 
-- [Incident fields](https://docs.adversarial.com/guides/incidents/incident-fields/):
-  severity levels SEV-1 to SEV-5, severity reasoning, and AI Suggest Score for
-  incidents.
-- [Risk fields](https://docs.adversarial.com/guides/risks/risk-fields/):
-  likelihood, impact, urgency, initially reported urgency, the SLA and the due
-  date, and AI Suggest Score for risks.
+- [Incident fields](https://docs.adversarial.com/guides/incidents/incident-fields/)
+  and [incident scoring](https://docs.adversarial.com/guides/incidents/scoring-and-response/)
+- [Risk fields](https://docs.adversarial.com/guides/risks/risk-fields/)
+  and [risk scoring](https://docs.adversarial.com/guides/risks/scoring-and-remediation/)
+- [AI features](https://docs.adversarial.com/concepts/ai-features/), for AI
+  Suggest Score
+- [Incident FAQ](https://docs.adversarial.com/guides/incidents/faq/), for the
+  default view of the Incident Register
 
 ## Demo
 
@@ -115,9 +189,9 @@ script with scenarios for each part of the feature.
   - **Risk Editor** to create risks.
   - Both roles, or **Editor**, to use both actions.
 
+  See [Service accounts](https://docs.adversarial.com/guides/service-accounts/),
   [API access](https://docs.adversarial.com/guides/service-accounts/api-access/)
-  in the Adversarial documentation explains service accounts, their roles and
-  their IP allowlist.
+  and [Managing roles](https://docs.adversarial.com/guides/roles/managing-roles/).
 - Network access from the Splunk server to your Adversarial API.
 
 The app uses only the Python standard library. You do not install packages.
@@ -150,8 +224,11 @@ scripts. Splunk does not need them, and they stay out of the archive.
 
 ## Set up the credentials
 
-Use the setup page or the command line. Splunk keeps the values encrypted in
-the secret store. The client secret is never written to a configuration file.
+Use the setup page or the command line. The app keeps the values in the Splunk
+secret store (`storage/passwords`). Splunk encrypts each secret and writes it
+to `local/passwords.conf` of the app. No setting holds the secret in plain
+text. See
+[Store secrets](https://dev.splunk.com/enterprise/docs/developapps/manageknowledge/secretstorage/).
 Both actions read the same credentials.
 
 The app keeps these entries in the secret store, in the realm `adversarial`:
@@ -167,12 +244,21 @@ browser. An install of version 1.0 kept the secret inside `config`. The app
 still reads it there, and the next save on the setup page, or with
 `configure_credentials.py`, moves it into its own entry.
 
+Only the `admin` and `sc_admin` roles can read or change these entries. To let
+the alerts of another role use the actions, give that role the
+`list_storage_passwords` and `edit_storage_passwords` capabilities, and add it
+to the `[passwords]` stanza of `metadata/local.meta`. See
+[Secret storage RBAC](https://dev.splunk.com/enterprise/docs/developapps/manageknowledge/secretstorage/secretstoragerbac/).
+
 **Setup page**
 
-1. Open the **Adversarial** app.
-2. Select **Setup**.
-3. Type the API base URL, the client ID and the client secret.
-4. Select **Save**.
+1. Open the **Adversarial** app. The setup page is its only page.
+2. Type the API base URL, the client ID and the client secret.
+3. Select **Save**.
+
+A save marks the app as configured (`is_configured = 1` in `local/app.conf`).
+The command line does the same. Until then, a user who opens the app sees the
+Splunk **App configuration** page, with a button to the setup page.
 
 **Command line**
 
@@ -221,16 +307,18 @@ run `--verify --client-id arm_sa_...`. To remove it, run
 ## Add an alert action to an alert
 
 1. Open a saved alert, or create one.
-2. In **Trigger Actions**, select **Add Actions**.
+2. In **Trigger Actions**, select **Add trigger actions** (**Add Actions** in Splunk 9).
 3. Select **Create Adversarial incident** or **Create Adversarial risk**.
 4. Complete the form.
 
 One alert can hold both actions. Splunk starts each action one time for each
-alert firing.
+alert firing, or one time for each result with the trigger **For each result**.
 
 Splunk replaces a `$...$` token with a value from the alert. For example,
 `$name$` becomes the name of the alert, and `$result.dest$` becomes the `dest`
-field of the first search result.
+field of the first search result. The action replaces a `{{row.dest}}` token with
+the `dest` field of the row that gives the record. See "One record, or one
+record for each result".
 
 **Create Adversarial incident**
 
@@ -243,7 +331,9 @@ field of the first search result.
 | Status | New, In Progress or Review |
 | Source | The incident source. See "Source names" after the tables. |
 | Tags | Item tags, with a comma between tags. See "Tags" after the tables. |
-| Fields | Field names from the first search result. Use a comma between names. A name can hold a wildcard, for example `src_*`. |
+| Fields | Field names from the search result. Use a comma between names. A name can hold a wildcard, for example `src_*`. |
+| Incidents to create | **One incident per alert** (`one`) or **One incident per result row** (`each`). See "One record, or one record for each result". |
+| Maximum incidents | The limit of incidents for one alert firing with **One incident per result row**. `0` means no limit. Default: 25 |
 | Splunk link | Add a comment with a link to the search results |
 
 **Create Adversarial risk**
@@ -263,7 +353,9 @@ field of the first search result.
 | Impact reason | Why the impact is correct |
 | Remediation task | What a person must do to close the risk |
 | Control statement | The control that must hold |
-| Fields | Field names from the first search result. Use a comma between names. A name can hold a wildcard, for example `src_*`. |
+| Fields | Field names from the search result. Use a comma between names. A name can hold a wildcard, for example `src_*`. |
+| Risks to create | **One risk per alert** (`one`) or **One risk per result row** (`each`). See "One record, or one record for each result". |
+| Maximum risks | The limit of risks for one alert firing with **One risk per result row**. `0` means no limit. Default: 25 |
 | Splunk link | Add a comment with a link to the search results |
 
 The risk action does not send a due date, an expected date or a threat
@@ -304,12 +396,14 @@ hour, and keeps a host with 20 or more:
     | stats count AS failed_logins, latest(src_ip) AS src_ip,
             values(user) AS user, latest(app) AS app BY dest
     | where failed_logins >= 20
+    | eval user=mvjoin(user, ", ")
     | sort - failed_logins
 
 The `sort` command puts the host with the most failed logins first, because the
 incident holds the first row. The **Fields** setting names the fields of that
 row, so the description holds the host, the source address, the user names and
-the application.
+the application. `mvjoin` turns the user names into one value, because a
+`$result.user$` token gives only the first value of a multi-value field.
 
 **Posture: one risk for the whole condition**
 
@@ -331,10 +425,12 @@ holds every affected host in `host_list`.
 A multi-value field, for example `host_list`, arrives at the alert action as a
 list. The description then names every host, up to 20 names.
 
-**Suppression**
+**Throttle**
 
-Both example alerts use the suppression settings of Splunk, because a condition
-that stays true would otherwise create a record on every run:
+Both example alerts use
+[throttling](https://help.splunk.com/splunk-enterprise/alert-and-respond/alerting-manual/9.4/manage-alert-trigger-conditions-and-throttling/throttle-alerts),
+also known as suppression, because a condition that stays true would otherwise
+create a record on every run:
 
     alert.suppress = 1
     alert.suppress.period = 24h
@@ -342,17 +438,19 @@ that stays true would otherwise create a record on every run:
 The detection suppresses a repeat for 24 hours, and the posture search for
 7 days. Splunk holds the alert down for the whole period, and not for one host,
 so a second host that crosses the threshold in the same period does not create
-a record. Use a shorter period, or one alert for each group of assets, if your
-environment needs a record for every host.
-
-Splunk keys the suppression on a field value only for a per-result alert, which
-is `alert.digest_mode = 0`. The example alerts keep the default digest mode, so
-they do not use `alert.suppress.fields`.
+a record. To get a record for every host, use the trigger **For each result**
+and throttle by the `dest` field (`alert.suppress.fields = dest`). See "One
+record, or one record for each result".
 
 ## Use an alert action from a search
 
-The `sendalert` command starts an alert action directly. Use it to test the
-setup, because it needs no schedule and no data.
+The [`sendalert`](https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/10.6/search-commands/sendalert)
+command starts an alert action directly. Use it to test the setup, because it
+needs no schedule and no data. The user needs the `run_sendalert` capability.
+
+Turn off **Preview** in the search bar before you run `sendalert`. With
+preview on, Splunk can start the action more than one time, and each start
+creates a record.
 
     | makeresults
     | eval dest="auth-gateway-01", failed_logins=137
@@ -397,21 +495,28 @@ actions use the same codes.
 | --- | --- |
 | 0 | The alert action created the record. |
 | 2 | A setting is missing or not valid. |
-| 3 | The API refused the credentials. |
+| 3 | The API refused the credentials, or the address of the Splunk server is outside the IP allowlist. |
 | 4 | The API refused the record. |
 | 5 | The Splunk server cannot reach the API. |
 | 6 | An unexpected error occurred. |
-| 7 | The service account lacks a permission, or the API refused the address of the Splunk server. |
+| 7 | The service account lacks a permission, or the API refused a cached token from an address outside the IP allowlist. |
 
 The alert action reports success if the record exists but the comment failed.
 The record is the result, and the comment is extra.
 
 ## Find the log messages
 
-Use this search.
+Splunk writes the output of a scheduled alert action to `splunkd.log`. Use this
+search:
 
     index=_internal sourcetype=splunkd component=sendmodalert
     action="adversarial_*"
+
+For a `sendalert` search, read `search.log` in the dispatch directory of the
+search, or open **Job > Inspect Job**.
+
+Splunk stops an alert action after `maxtime` (default 5 minutes). See
+[alert_actions.conf](https://help.splunk.com/en/splunk-enterprise/administer/admin-manual/10.0/configuration-file-reference/10.0.10-configuration-file-reference/alert_actions.conf).
 
 ## Troubleshooting
 
@@ -419,8 +524,8 @@ Use this search.
 | --- | --- |
 | Exit code 2 | Read the log. It names the setting and the valid values. If the credentials are missing, open the setup page and store them again. |
 | Exit code 2 and "no client secret" | The alert sets `param.client_id` to an account with no stored secret. Run `configure_credentials.py --add-client`. |
-| Exit code 3 | The token endpoint refused the client ID or the secret. Check that both are correct, that the service account is active, and that it has not expired. |
-| Exit code 4 | Check the source name and the tags. Both must exist in your organization. The risk sources and the incident sources are two separate lists. |
+| Exit code 3 | The token endpoint refused the client ID or the secret. Check that both are correct, that the service account is not disabled or expired, and that the IP allowlist holds the address of the Splunk server. The API gives the same answer for each cause. |
+| Exit code 4 | Check the source name and the tags. Both must exist in your organization. The risk sources and the incident sources are two separate lists. If the log says that the API limited the request rate, lower the maximum records or make the search return fewer rows. |
 | Exit code 5 | Check that the Splunk server can reach the API URL. |
 | Exit code 7 | The token is valid, but the account may not do the request. Give it the role for the record type, and `tags:read` if the alert sets tags. If the service account has an IP allowlist, add the address of the Splunk server. Run `--verify --require ...` to see what is missing. |
 

@@ -18,8 +18,11 @@ https://static.adversarial.com/adversarial_mark.png:
 
 The app rail reads the `appIconAlt` files, and the app list reads the `appIcon`
 files. An app without the `appIconAlt` files gets a letter in the app rail,
-because Splunk answers the request with an empty image. Every app of Splunk
-holds both sets, and this app holds the same icon in both.
+because Splunk answers the request with an empty image. This app holds the same
+icon in both sets.
+
+For the alert action icon, Splunk recommends a 48 x 48 PNG file. See
+[Create a custom alert action](https://dev.splunk.com/enterprise/docs/devtools/customalertactions/configappcaa).
 
 The mark is a black circle with the letter cut out of it. Splunk puts the app
 icon on dark chrome, which shows through the cut and hides the letter. The icons

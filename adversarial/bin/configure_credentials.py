@@ -215,6 +215,7 @@ def store(rest, options):
     rest.write_config(options.base_url, options.client_id)
     # Version 1.0 kept one token pair for every service account.
     rest.delete_secret(LEGACY_TOKEN_CACHE_USERNAME)
+    rest.mark_configured()
     print("The settings are stored. Default client ID: %s" % options.client_id)
     return 0
 
