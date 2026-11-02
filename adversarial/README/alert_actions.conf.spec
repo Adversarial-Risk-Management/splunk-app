@@ -87,6 +87,8 @@ param.max_records = <integer>
 * The maximum number of records for one alert firing when param.records is
   each. The action creates records for the first rows, and writes a warning
   for the rest.
+* 0 means no limit. Splunk still stops the action after maxtime, and the API
+  limits the request rate of the service account.
 * Default: 25
 
 param.info_severity = <string>
@@ -213,6 +215,8 @@ param.max_records = <integer>
 * The maximum number of records for one alert firing when param.records is
   each. The action creates records for the first rows, and writes a warning
   for the rest.
+* 0 means no limit. Splunk still stops the action after maxtime, and the API
+  limits the request rate of the service account.
 * Default: 25
 
 param.info_severity = <string>

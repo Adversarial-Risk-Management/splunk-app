@@ -34,7 +34,8 @@ firing creates:
             aggregates the rows, or sorts them so that the first row is the
             row that matters.
     each    One record for each result. The action reads the results file of
-            the search, and stops after `param.max_records` records.
+            the search, and stops after `param.max_records` records. The
+            value 0 removes the limit.
 
 A text setting can hold a `{{row.<field>}}` token. The action replaces the
 token with the value of the field in the row that gives the record. Splunk
@@ -101,8 +102,9 @@ MAX_FIELD_VALUES = 20
 
 # The default limit of records for one alert firing in `each` mode. A search
 # that returns more rows than this is usually wrong, and a flood of records
-# helps nobody.
+# helps nobody. The value 0 removes the limit.
 DEFAULT_MAX_RECORDS = 25
+NO_LIMIT = 0
 
 # The values of `param.records`.
 RECORDS_ONE = "one"
@@ -208,7 +210,11 @@ def records_mode(payload):
 
 
 def max_records(payload):
-    """Return the limit of records for one alert firing, or None if not valid."""
+    """Return the limit of records for one alert firing, or None if not valid.
+
+    An empty setting gives the default. The value 0 (`NO_LIMIT`) means no
+    limit.
+    """
     raw = (payload["configuration"].get("max_records") or "").strip()
     if not raw:
         return DEFAULT_MAX_RECORDS
@@ -216,7 +222,7 @@ def max_records(payload):
         value = int(raw)
     except ValueError:
         return None
-    return value if value > 0 else None
+    return value if value >= 0 else None
 
 
 def multi_value(encoded):
@@ -288,8 +294,10 @@ def result_rows(payload):
         log("WARN", "The payload holds no results file. The action uses the first result.")
         rows = [first]
 
-    limit = max_records(payload) or DEFAULT_MAX_RECORDS
-    if len(rows) > limit:
+    limit = max_records(payload)
+    if limit is None:
+        limit = DEFAULT_MAX_RECORDS
+    if limit != NO_LIMIT and len(rows) > limit:
         log(
             "WARN",
             "The search returned %d results. The action creates the first %d "
@@ -298,7 +306,8 @@ def result_rows(payload):
             % (len(rows), limit),
         )
     total = len(rows)
-    rows = rows[:limit]
+    if limit != NO_LIMIT:
+        rows = rows[:limit]
     return [(row, "Result %d of %d" % (number, total)) for number, row in enumerate(rows, 1)]
 
 
@@ -427,7 +436,7 @@ def common_problems(payload):
         )
     if max_records(payload) is None:
         problems.append(
-            "The `max_records` setting is `%s`. Use a number above 0."
+            "The `max_records` setting is `%s`. Use 0 for no limit, or a number above 0."
             % payload["configuration"].get("max_records")
         )
     return problems
@@ -562,6 +571,15 @@ def submit(create, record, kind):
                 "the IP allowlist: %s" % (kind, error),
             )
             return None, EXIT_FORBIDDEN
+        if error.status == 429:
+            # The API limits the request rate of a service account. A run that
+            # creates many records can reach the limit.
+            log(
+                "FATAL",
+                "The API limited the request rate. Lower param.max_records, or "
+                "make the search return fewer rows: %s" % error,
+            )
+            return None, EXIT_API_REJECTED
         log("FATAL", "The API rejected the %s: %s" % (kind, error))
         return None, EXIT_API_REJECTED
     except TransportError as error:

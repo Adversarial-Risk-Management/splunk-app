@@ -153,6 +153,32 @@ def test_each_mode_stops_at_the_limit(client, action, tmp_path):
 
 
 @pytest.mark.parametrize("action", ACTIONS)
+def test_each_mode_with_zero_has_no_limit(client, action, tmp_path):
+    rows = [{"dest": "gw-%02d" % n, "failed_logins": "1", "user": "u"} for n in range(40)]
+    path = write_results(tmp_path / "results.csv.gz", rows)
+    assert action.send(payload(path, records="each", max_records="0")) == alert.OK
+    records = FakeClient.instances[0].records
+    assert len(records) == 40
+    assert "Result 40 of 40:" in records[-1]["description"]
+
+
+@pytest.mark.parametrize("action", ACTIONS)
+def test_each_mode_uses_the_default_limit_of_25(client, action, tmp_path):
+    rows = [{"dest": "gw-%02d" % n, "failed_logins": "1", "user": "u"} for n in range(30)]
+    path = write_results(tmp_path / "results.csv.gz", rows)
+    assert action.send(payload(path, records="each")) == alert.OK
+    assert len(FakeClient.instances[0].records) == 25
+
+
+@pytest.mark.parametrize("action", ACTIONS)
+def test_a_rate_limit_stops_the_run_with_a_clear_message(client, action, tmp_path, capsys):
+    client["create_error"] = ApiError(429, "Too Many Requests", "url")
+    path = write_results(tmp_path / "results.csv.gz", ROWS)
+    assert action.send(payload(path, records="each", max_records="0")) == alert.EXIT_API_REJECTED
+    assert "limited the request rate" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("action", ACTIONS)
 def test_each_mode_without_a_results_file_uses_the_first_result(client, action):
     assert action.send(payload(records="each")) == alert.OK
     records = FakeClient.instances[0].records
@@ -180,7 +206,7 @@ def test_each_mode_uses_one_client_for_all_records(client, action, tmp_path):
 @pytest.mark.parametrize("action", ACTIONS)
 @pytest.mark.parametrize(
     "settings",
-    [{"records": "all"}, {"max_records": "0"}, {"max_records": "many"}],
+    [{"records": "all"}, {"max_records": "-1"}, {"max_records": "many"}],
 )
 def test_a_bad_records_setting_returns_the_validation_code(client, action, settings):
     assert action.send(payload(**settings)) == alert.EXIT_VALIDATION_FAILED

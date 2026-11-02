@@ -41,7 +41,7 @@ select how many records one alert firing creates.
 | Value | Result |
 | --- | --- |
 | `one` (form: **One incident per alert**) | One record from the first row of the search results. This is the default. |
-| `each` (form: **One incident per result row**) | One record for each row of the search results, up to **Maximum incidents** or **Maximum risks** (`param.max_records`, default 25). |
+| `each` (form: **One incident per result row**) | One record for each row of the search results, up to **Maximum incidents** or **Maximum risks** (`param.max_records`, default 25, `0` for no limit). |
 
 Splunk can also start the action one time for each result. See "The Splunk
 trigger" at the end of this section.
@@ -72,9 +72,12 @@ example one incident for each host above a threshold.
   the same value in every record. Splunk replaces an unknown `$...$` token
   with an empty string, so the row token does not use `$`.
 - The description names the row, for example `Result 2 of 5`.
-- **Maximum incidents** or **Maximum risks** limits the records of one alert firing. The action
-  creates records for the first rows and writes a warning for the other rows.
-  Sort the search, so the rows that matter come first.
+- **Maximum incidents** or **Maximum risks** limits the records of one alert
+  firing. The action creates records for the first rows and writes a warning
+  for the other rows. Sort the search, so the rows that matter come first.
+  Set `0` for no limit. Splunk still stops the action after `maxtime`
+  (default 5 minutes), and the API limits the request rate of a service
+  account. Each record takes two requests: the record and the comment.
 - The action stops at the first failure. The records that it created before
   the failure stay.
 - Use **Throttle** in the alert to stop a repeat. With the trigger **Once**,
@@ -330,7 +333,7 @@ record for each result".
 | Tags | Item tags, with a comma between tags. See "Tags" after the tables. |
 | Fields | Field names from the search result. Use a comma between names. A name can hold a wildcard, for example `src_*`. |
 | Incidents to create | **One incident per alert** (`one`) or **One incident per result row** (`each`). See "One record, or one record for each result". |
-| Maximum incidents | The limit of incidents for one alert firing with **One incident per result row**. Default: 25 |
+| Maximum incidents | The limit of incidents for one alert firing with **One incident per result row**. `0` means no limit. Default: 25 |
 | Splunk link | Add a comment with a link to the search results |
 
 **Create Adversarial risk**
@@ -352,7 +355,7 @@ record for each result".
 | Control statement | The control that must hold |
 | Fields | Field names from the search result. Use a comma between names. A name can hold a wildcard, for example `src_*`. |
 | Risks to create | **One risk per alert** (`one`) or **One risk per result row** (`each`). See "One record, or one record for each result". |
-| Maximum risks | The limit of risks for one alert firing with **One risk per result row**. Default: 25 |
+| Maximum risks | The limit of risks for one alert firing with **One risk per result row**. `0` means no limit. Default: 25 |
 | Splunk link | Add a comment with a link to the search results |
 
 The risk action does not send a due date, an expected date or a threat
@@ -522,7 +525,7 @@ Splunk stops an alert action after `maxtime` (default 5 minutes). See
 | Exit code 2 | Read the log. It names the setting and the valid values. If the credentials are missing, open the setup page and store them again. |
 | Exit code 2 and "no client secret" | The alert sets `param.client_id` to an account with no stored secret. Run `configure_credentials.py --add-client`. |
 | Exit code 3 | The token endpoint refused the client ID or the secret. Check that both are correct, that the service account is not disabled or expired, and that the IP allowlist holds the address of the Splunk server. The API gives the same answer for each cause. |
-| Exit code 4 | Check the source name and the tags. Both must exist in your organization. The risk sources and the incident sources are two separate lists. |
+| Exit code 4 | Check the source name and the tags. Both must exist in your organization. The risk sources and the incident sources are two separate lists. If the log says that the API limited the request rate, lower the maximum records or make the search return fewer rows. |
 | Exit code 5 | Check that the Splunk server can reach the API URL. |
 | Exit code 7 | The token is valid, but the account may not do the request. Give it the role for the record type, and `tags:read` if the alert sets tags. If the service account has an IP allowlist, add the address of the Splunk server. Run `--verify --require ...` to see what is missing. |
 
