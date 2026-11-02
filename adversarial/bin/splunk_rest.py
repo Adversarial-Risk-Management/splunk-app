@@ -97,11 +97,25 @@ class SplunkRest:
         self.session_key = result["sessionKey"]
         return self.session_key
 
+    # -- App state -------------------------------------------------------
+
+    def mark_configured(self):
+        """Tell Splunk that the setup is complete.
+
+        Splunk writes `is_configured = 1` to local/app.conf, and stops opening
+        the setup page when a user opens the app.
+        """
+        self._call(
+            "POST",
+            "/services/apps/local/%s" % urllib.parse.quote(self.app),
+            {"configured": "1"},
+        )
+
     # -- Secret store ----------------------------------------------------
 
     def _passwords_path(self, username=None):
-        # Entries live in the app namespace and belong to no single user, so
-        # every alert owner in the org can read them.
+        # Entries live in the app namespace and belong to no single user.
+        # metadata/default.meta limits them to the admin and sc_admin roles.
         base = "/servicesNS/nobody/%s/storage/passwords" % urllib.parse.quote(self.app)
         if username is None:
             return base

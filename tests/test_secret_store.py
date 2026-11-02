@@ -20,10 +20,13 @@ class FakeSplunkd:
     """An in-memory `storage/passwords` collection for the `adversarial` app."""
 
     PATH = "/servicesNS/nobody/adversarial/storage/passwords"
+    APP_PATH = "/services/apps/local/adversarial"
 
     def __init__(self):
         # Map of "<realm>:<user>:" to the stored text.
         self.entries = {}
+        # The `configured` value of the last POST to the app endpoint.
+        self.configured = None
 
     def install(self, rest):
         rest._call = self.call  # noqa: SLF001 - the test replaces the transport
@@ -31,6 +34,9 @@ class FakeSplunkd:
 
     def call(self, method, path, fields=None):
         base, _, _ = path.partition("?")
+        if base == self.APP_PATH:
+            self.configured = fields["configured"]
+            return {}
         if base == self.PATH:
             if method == "GET":
                 return {"entry": [self._entry(name) for name in sorted(self.entries)]}
@@ -200,6 +206,21 @@ def test_the_script_stores_the_default_account_without_a_combined_secret():
     assert "client_secret" not in json.loads(fake.entries["adversarial:config:"])
     assert fake.entries["adversarial:secret_arm_sa_a:"] == "arm_sk_a"
     assert "adversarial:token_cache:" not in fake.entries
+
+
+def test_the_script_marks_the_app_configured():
+    """Splunk then stops opening the setup page when a user opens the app."""
+    fake = FakeSplunkd()
+    configure_credentials.run(rest_for(fake), options(
+        "--base-url", BASE_URL, "--client-id", "arm_sa_a", "--client-secret", "arm_sk_a"))
+    assert fake.configured == "1"
+
+
+def test_add_client_does_not_change_the_configured_state():
+    fake = FakeSplunkd()
+    configure_credentials.run(rest_for(fake), options(
+        "--add-client", "--client-id", "arm_sa_b", "--client-secret", "arm_sk_b"))
+    assert fake.configured is None
 
 
 def test_add_client_keeps_the_default_account():

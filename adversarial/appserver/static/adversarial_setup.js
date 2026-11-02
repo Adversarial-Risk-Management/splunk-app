@@ -19,6 +19,7 @@
     var REALM = 'adversarial';
     var CONFIG_ENTRY = entry('config');
     var PASSWORDS_PATH = '/servicesNS/nobody/' + APP + '/storage/passwords';
+    var APP_PATH = '/services/apps/local/' + APP;
 
     /* The stored settings, as the last load read them. */
     var stored = {};
@@ -188,6 +189,11 @@
         }).then(function () {
             /* Version 1.0 kept one token pair for every service account. */
             return deleteSecret('token_cache');
+        }).then(function () {
+            /* Splunk stops opening this page when a user opens the app. */
+            return request('POST', APP_PATH, { configured: '1' }).then(function (result) {
+                return result.ok ? result : Promise.reject(result.text);
+            });
         }).then(function () {
             stored = { base_url: baseUrl, client_id: clientId };
             element('adversarial-client-secret').value = '';

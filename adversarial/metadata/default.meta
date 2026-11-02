@@ -1,10 +1,32 @@
 #
 # Adversarial - object permissions.
 #
-# `export = system` makes the alert action available in every app, so an alert
-# that lives in the Search app can use it.
+# Every object stays in this app, except the objects that an alert in another
+# app needs. Splunk's own alert action apps (alert_webhook, alert_logevent)
+# use the same layout.
 #
 
 []
-access = read : [ * ], write : [ admin, power ]
+access = read : [ * ], write : [ admin, power, sc_admin ]
+
+# The alert actions, their forms, and the save-time check of their settings.
+# An alert in the Search app, or in any other app, can then use them.
+[alert_actions]
 export = system
+
+[alerts]
+export = system
+
+[restmap]
+export = system
+
+# The JSON field extraction of the demo source types, for a search in any app.
+[props]
+export = system
+
+# The secret store entries: the settings, the client secrets and the cached
+# tokens. Only an administrator reads or changes them. To let the alerts of
+# another role use the actions, add that role here in local.meta. The role also
+# needs the list_storage_passwords and edit_storage_passwords capabilities.
+[passwords]
+access = read : [ admin, sc_admin ], write : [ admin, sc_admin ]
