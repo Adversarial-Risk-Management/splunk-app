@@ -15,8 +15,12 @@ rm -f "${out}"
 find "${root}/${app}" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "${root}/${app}" -name '*.pyc' -delete
 
-tar --exclude='__pycache__' --exclude='*.pyc' --exclude='.DS_Store' \
-    -C "${root}" -czf "${out}" "${app}"
+# COPYFILE_DISABLE stops the macOS tar from adding a `._<name>` file for a file
+# with extended attributes. Splunk reads `._alert_actions.conf` as a .conf file.
+# Splunk recommends the ustar format for an app archive. See
+# https://dev.splunk.com/enterprise/docs/releaseapps/packageapps/
+COPYFILE_DISABLE=1 tar --format ustar --exclude='__pycache__' --exclude='*.pyc' \
+    --exclude='.DS_Store' --exclude='._*' -C "${root}" -czf "${out}" "${app}"
 
 echo "wrote ${out}"
 tar -tzf "${out}" | sort
