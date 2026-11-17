@@ -65,6 +65,32 @@
                         </span>
                     </div>
 
+                    <h3>Proxy (optional)</h3>
+                    <div class="adversarial-field">
+                        <label for="adversarial-proxy-url">Proxy URL</label>
+                        <input type="text" id="adversarial-proxy-url" spellcheck="false"
+                               placeholder="http://proxy.example.com:3128" />
+                        <span class="adversarial-help">
+                            An HTTP proxy for the requests to the Adversarial API. Leave it empty
+                            to connect directly. The requests to Splunk itself never use it.
+                        </span>
+                    </div>
+
+                    <div class="adversarial-field">
+                        <label for="adversarial-proxy-user">Proxy user</label>
+                        <input type="text" id="adversarial-proxy-user" spellcheck="false"
+                               placeholder="Optional" autocomplete="off" />
+                    </div>
+
+                    <div class="adversarial-field">
+                        <label for="adversarial-proxy-password">Proxy password</label>
+                        <input type="password" id="adversarial-proxy-password" spellcheck="false"
+                               autocomplete="new-password" />
+                        <span class="adversarial-help">
+                            Leave it empty to keep the stored password. Splunk keeps it encrypted.
+                        </span>
+                    </div>
+
                     <div class="adversarial-buttons">
                         <button type="button" class="btn btn-primary" id="adversarial-save">Save</button>
                     </div>

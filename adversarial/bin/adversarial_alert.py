@@ -66,7 +66,7 @@ Exit codes
 3  Authentication failed. Check the client ID, the client secret, and the IP
    allowlist of the service account.
 4  The API rejected the request. Check the source name and the tags.
-5  The API was not reachable.
+5  The API was not reachable, or the proxy refused the request.
 6  An unexpected error occurred.
 7  The service account lacks a permission, for example `incidents:write` or
    `tags:read`, or the API refused a cached token from an address outside the
@@ -82,7 +82,14 @@ import re
 import sys
 import traceback
 
-from adversarial_api import AdversarialClient, ApiError, TokenError, TransportError
+from adversarial_api import (
+    AdversarialClient,
+    ApiError,
+    ProxyError,
+    TokenError,
+    TransportError,
+    check_proxy_url,
+)
 from splunk_rest import SecretStoreTokenCache, SplunkRest, SplunkRestError
 
 OK = 0
@@ -470,7 +477,8 @@ def load_settings(payload):
     alert can override the API URL and the client ID, which lets one Splunk
     instance send records to more than one organization. The secret of an
     overriding client ID must be in the secret store too: store it with
-    `configure_credentials.py --add-client`.
+    `configure_credentials.py --add-client`. The proxy setting applies to every
+    alert.
     """
     config = payload["configuration"]
     stored = {}
@@ -498,10 +506,21 @@ def load_settings(payload):
         except SplunkRestError as error:
             log("WARN", "Could not read the client secret of %s: %s" % (client_id, error))
 
+    proxy_url = stored.get("proxy_url") or ""
+    proxy = ""
+    if rest and proxy_url:
+        try:
+            proxy = rest.proxy(stored)
+        except SplunkRestError as error:
+            log("WARN", "Could not read the proxy password: %s" % error)
+            proxy = proxy_url
+
     settings = {
         "base_url": (config.get("base_url") or "").strip() or stored.get("base_url", ""),
         "client_id": client_id,
         "client_secret": secret,
+        "proxy_url": proxy_url,
+        "proxy": proxy,
     }
     return settings, rest
 
@@ -529,6 +548,13 @@ def connect(payload):
             "page, or run bin/configure_credentials.py." % ", ".join(missing),
         )
         return None, EXIT_VALIDATION_FAILED
+    if settings["proxy_url"]:
+        problem = check_proxy_url(settings["proxy_url"])
+        if problem:
+            log("FATAL", "The stored proxy URL is not valid: %s" % problem)
+            return None, EXIT_VALIDATION_FAILED
+        # The URL without the credentials, so the password stays out of the log.
+        log("INFO", "Sending the requests through the proxy %s" % settings["proxy_url"])
 
     cache = SecretStoreTokenCache(rest, settings["client_id"], log) if rest else None
     client = AdversarialClient(
@@ -537,6 +563,7 @@ def connect(payload):
         settings["client_secret"],
         cache=cache,
         log=log,
+        proxy=settings["proxy"] or None,
     )
     return client, OK
 
@@ -582,6 +609,9 @@ def submit(create, record, kind):
             return None, EXIT_API_REJECTED
         log("FATAL", "The API rejected the %s: %s" % (kind, error))
         return None, EXIT_API_REJECTED
+    except ProxyError as error:
+        log("FATAL", str(error))
+        return None, EXIT_NOT_REACHABLE
     except TransportError as error:
         log("FATAL", "The API was not reachable: %s" % error)
         return None, EXIT_NOT_REACHABLE

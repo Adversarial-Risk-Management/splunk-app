@@ -104,6 +104,28 @@ The script reads the settings from `.env`.
 
     dev/install.sh
 
+## `proxy_e2e.sh`
+
+Test the proxy setting end to end. The script starts `dev/proxy/compose.yaml`:
+Splunk on a Docker network with no route out, an HTTP proxy with a user and a
+password, and a TLS front for the API as `https://api.test:8443`. Only the
+proxy can reach the API. The script installs the app and checks that:
+
+1. Splunk cannot reach the API directly.
+2. With no proxy setting, an alert stops with exit code 5 and creates nothing.
+3. With a wrong proxy password, the proxy refuses the tunnel, and the alert
+   stops with exit code 5.
+4. With the proxy setting, an alert creates 2 incidents over HTTPS, and the
+   proxy log shows each `CONNECT` tunnel.
+5. With an `http://` API URL, the proxy log shows each forwarded request.
+
+The API must listen on port 8080 of the workstation, on `0.0.0.0`. The script
+reads `.env`. `--keep` keeps the containers, and Splunk Web stays at
+`http://localhost:8889`.
+
+    dev/proxy_e2e.sh
+    dev/proxy_e2e.sh --keep
+
 ## `demo.sh`
 
 Run the command line demo. Each scenario shows one part of the feature, with

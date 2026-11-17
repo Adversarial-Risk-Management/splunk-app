@@ -1,7 +1,20 @@
 """Test helpers that the two alert actions share."""
 
+import os
+
 import adversarial_alert as alert
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def clean_environment(monkeypatch):
+    """The command line reads settings from the environment, for example from
+    a sourced .env file. The tests set each value themselves."""
+    for name in list(os.environ):
+        if name.startswith(("ADVERSARIAL_", "SPLUNK_")) or name.lower() in (
+            "http_proxy", "https_proxy", "all_proxy", "no_proxy"
+        ):
+            monkeypatch.delenv(name)
 
 
 class FakeClient:
@@ -9,11 +22,12 @@ class FakeClient:
 
     instances = []
 
-    def __init__(self, base_url, client_id, client_secret, cache=None, log=None):
+    def __init__(self, base_url, client_id, client_secret, cache=None, log=None, proxy=None):
         self.base_url = base_url
         self.client_id = client_id
         self.client_secret = client_secret
         self.cache = cache
+        self.proxy = proxy
         self.token_source = "client_credentials"
         # Every record that the action created, and every comment it added.
         self.records = []

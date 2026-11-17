@@ -144,7 +144,7 @@ def test_an_alert_uses_the_stored_default_account(splunkd):
     store_default(splunkd)
     settings, _ = alert.load_settings(payload())
     assert settings == {"base_url": BASE_URL, "client_id": "arm_sa_a",
-                        "client_secret": "arm_sk_a"}
+                        "client_secret": "arm_sk_a", "proxy_url": "", "proxy": ""}
 
 
 def test_an_overriding_client_id_uses_its_own_secret(splunkd):

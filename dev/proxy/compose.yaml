@@ -1,0 +1,57 @@
+# Test network for the proxy setting of the app.
+#
+#   splunk  --(internal network: no route out)-->  proxy  -->  api-tls  -->  API on the host
+#
+# The `internal` network has no route to the host or to the internet. The
+# proxy is the only container on both networks, so a request from Splunk
+# reaches the Adversarial API only through the proxy. The proxy needs a user
+# name and a password, and it logs each request.
+#
+# `api-tls` puts TLS in front of the API on the host, as `https://api.test:8443`.
+# Only the `egress` network knows the name `api.test`, so Splunk cannot resolve
+# it: the proxy resolves it for the CONNECT tunnel.
+#
+# dev/proxy_e2e.sh starts this file and runs the test. See dev/README.md.
+
+name: adversarial-proxy-test
+
+networks:
+  internal:
+    internal: true
+  egress: {}
+
+services:
+  proxy:
+    build: { context: ., dockerfile: proxy.Dockerfile }
+    networks: [internal, egress]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    environment:
+      PROXY_USER: ${PROXY_USER:-splunk}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:?set PROXY_PASSWORD}
+
+  api-tls:
+    build: { context: ., dockerfile: tls.Dockerfile }
+    networks:
+      egress:
+        aliases: [api.test]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: ["./certs:/certs:ro"]
+
+  splunk:
+    image: splunk/splunk:latest
+    platform: linux/amd64
+    container_name: ${SPLUNK_CONTAINER:-adversarial-proxy-splunk}
+    networks: [internal]
+    environment:
+      SPLUNK_START_ARGS: --accept-license
+      SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:?set SPLUNK_PASSWORD}
+    volumes: ["./certs/ca.pem:/opt/adversarial-test-ca.pem:ro"]
+
+  # Splunk Web for a manual check of the setup page, at http://localhost:8889.
+  # This container forwards one port. It gives Splunk no route out.
+  web:
+    image: alpine/socat:latest
+    networks: [internal, egress]
+    ports: ["127.0.0.1:8889:8000"]
+    command: TCP-LISTEN:8000,fork,reuseaddr TCP:splunk:8000

@@ -21,6 +21,13 @@ A cached pair records the API URL and the client ID that it belongs to. The
 client ignores a pair with other values, so an alert that sends to another
 organization never uses the token of the default service account.
 
+Proxy
+-----
+With a proxy URL, every request goes through that HTTP proxy. An `https://`
+API URL uses a `CONNECT` tunnel, so the proxy does not see the request or the
+token. Without a proxy URL, Python uses the `HTTPS_PROXY`, `HTTP_PROXY` and
+`NO_PROXY` environment variables, if the environment sets them.
+
 The module uses only the Python standard library. You do not need to install
 packages into Splunk.
 """
@@ -59,6 +66,42 @@ class TransportError(Exception):
     """The request did not reach the API (DNS, TLS, connection, timeout)."""
 
 
+class ProxyError(TransportError):
+    """The proxy refused the request or the CONNECT tunnel."""
+
+
+def check_proxy_url(url):
+    """Return a problem with a proxy URL, or None when the URL is valid.
+
+    A proxy URL is `http://host:port` or `https://host:port`. It holds no user
+    name and no password: the app keeps the proxy password in the Splunk secret
+    store, apart from the URL.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return "The proxy URL must look like http://proxy.example.com:3128."
+    if parts.username is not None or parts.password is not None:
+        return "Put the proxy user and password in their own settings, not in the URL."
+    if parts.path not in ("", "/") or parts.query or parts.fragment:
+        return "The proxy URL holds only a scheme, a host and a port."
+    try:
+        parts.port
+    except ValueError:
+        return "The port of the proxy URL is not valid."
+    return None
+
+
+def proxy_with_credentials(url, user="", password=""):
+    """Return the proxy URL with the user and the password in it, for urllib."""
+    if not url or not user:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    credentials = urllib.parse.quote(user, safe="")
+    if password:
+        credentials += ":" + urllib.parse.quote(password, safe="")
+    return "%s://%s@%s" % (parts.scheme, credentials, parts.netloc)
+
+
 class MemoryTokenCache:
     """Token cache that holds one token pair for the life of the process.
 
@@ -79,7 +122,7 @@ class MemoryTokenCache:
 class AdversarialClient:
     """Minimal Adversarial API client with an OAuth token cache."""
 
-    def __init__(self, base_url, client_id, client_secret, cache=None, log=None):
+    def __init__(self, base_url, client_id, client_secret, cache=None, log=None, proxy=None):
         # `base_url` includes the `/api` path element, for example
         # `https://api.adversarial.com/api`.
         self.base_url = base_url.rstrip("/")
@@ -87,6 +130,15 @@ class AdversarialClient:
         self.client_secret = client_secret
         self.cache = cache or MemoryTokenCache()
         self.log = log or (lambda level, message: None)
+        # `proxy` is a proxy URL that can hold the credentials, from
+        # `proxy_with_credentials`. Without it, urllib reads the environment.
+        self.proxy = proxy
+        if proxy:
+            self._opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+            )
+        else:
+            self._opener = urllib.request.build_opener()
         # Records how the last token was obtained: "cache", "refresh_token" or
         # "client_credentials". The alert action writes this to the log.
         self.token_source = None
@@ -101,13 +153,27 @@ class AdversarialClient:
         try:
             # The API uses a public certificate, so the default certificate
             # store applies. The client does not disable verification.
-            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            with self._opener.open(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
                 text = response.read().decode("utf-8")
                 return json.loads(text) if text else {}
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", "replace")
+            if error.code == 407:
+                # An `http://` API URL: the proxy answers the request itself.
+                raise ProxyError(
+                    "The proxy refused the request to %s (HTTP 407). Check the "
+                    "proxy user and password." % url
+                ) from error
             raise ApiError(error.code, detail, url) from error
         except (urllib.error.URLError, ssl.SSLError, OSError) as error:
+            if "Tunnel connection failed" in str(error):
+                # An `https://` API URL: the proxy refused the CONNECT tunnel.
+                # Most proxies send 407 for a bad password, some send 401.
+                reason = str(getattr(error, "reason", error))
+                raise ProxyError(
+                    "The proxy refused the tunnel to %s (%s). Check the proxy "
+                    "URL, user and password." % (url, reason)
+                ) from error
             raise TransportError("%s %s failed: %s" % (method, url, error)) from error
 
     def _post_form(self, path, fields):

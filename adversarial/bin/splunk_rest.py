@@ -13,14 +13,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from adversarial_api import proxy_with_credentials
+
 # The app owns one realm in the secret store. These entries live in it:
 #
-#   config               the API URL and the default client ID, as JSON
+#   config               the API URL, the default client ID, and the proxy URL
+#                        and proxy user, as JSON
 #   secret_<client ID>   the client secret of one service account
 #   token_<client ID>    the cached OAuth token pair of one service account
+#   proxy_password       the password of the proxy user
 #
-# The setup page reads only `config`, so the client secret never reaches the
-# browser. Each service account has its own secret and its own token cache, so
+# The setup page reads only `config`, so no secret reaches the browser. Each service account has its own secret and its own token cache, so
 # an alert that overrides the client ID uses the right secret and the right
 # token.
 #
@@ -31,6 +34,7 @@ SECRET_REALM = "adversarial"
 CONFIG_USERNAME = "config"
 SECRET_PREFIX = "secret_"
 TOKEN_PREFIX = "token_"
+PROXY_PASSWORD_USERNAME = "proxy_password"
 
 
 def secret_username(client_id):
@@ -56,8 +60,13 @@ class SplunkRest:
         self.app = app
         # splunkd presents a self-signed certificate on the management port.
         # Verification is off for this local connection only. Requests to the
-        # Adversarial API keep full certificate verification.
-        self._ssl_context = ssl._create_unverified_context()
+        # Adversarial API keep full certificate verification. The empty
+        # ProxyHandler keeps this local connection away from any proxy that the
+        # environment sets.
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=ssl._create_unverified_context()),
+        )
 
     # -- HTTP ------------------------------------------------------------
 
@@ -70,9 +79,7 @@ class SplunkRest:
         if self.session_key:
             request.add_header("Authorization", "Splunk " + self.session_key)
         try:
-            with urllib.request.urlopen(
-                request, timeout=HTTP_TIMEOUT_SECONDS, context=self._ssl_context
-            ) as response:
+            with self._opener.open(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
                 text = response.read().decode("utf-8")
                 return json.loads(text) if text else {}
         except urllib.error.HTTPError as error:
@@ -170,7 +177,11 @@ class SplunkRest:
     # -- App configuration ------------------------------------------------
 
     def read_config(self):
-        """Return the stored API URL and default client ID as a dictionary."""
+        """Return the stored settings as a dictionary.
+
+        The keys are `base_url`, `client_id`, `proxy_url` and `proxy_user`. The
+        proxy keys are absent when no proxy is set.
+        """
         raw = self.read_secret(CONFIG_USERNAME)
         if not raw:
             return {}
@@ -179,11 +190,38 @@ class SplunkRest:
         except ValueError:
             raise SplunkRestError("The stored configuration is not valid JSON.")
 
-    def write_config(self, base_url, client_id):
-        """Store the API URL and the default client ID, without a secret."""
-        self.write_secret(
-            CONFIG_USERNAME, json.dumps({"base_url": base_url, "client_id": client_id})
-        )
+    def write_config(self, base_url, client_id, proxy_url="", proxy_user=""):
+        """Store the settings, without a secret.
+
+        An empty proxy URL removes the proxy, and the proxy password with it.
+        """
+        config = {"base_url": base_url, "client_id": client_id}
+        if proxy_url:
+            config["proxy_url"] = proxy_url
+            if proxy_user:
+                config["proxy_user"] = proxy_user
+        self.write_secret(CONFIG_USERNAME, json.dumps(config))
+        if not proxy_url or not proxy_user:
+            self.delete_secret(PROXY_PASSWORD_USERNAME)
+
+    def read_proxy_password(self):
+        """Return the stored proxy password, or an empty string."""
+        return self.read_secret(PROXY_PASSWORD_USERNAME) or ""
+
+    def write_proxy_password(self, password):
+        """Store the password of the proxy user."""
+        self.write_secret(PROXY_PASSWORD_USERNAME, password)
+
+    def proxy(self, config=None):
+        """Return the stored proxy URL with its credentials, or an empty string.
+
+        `config` is the result of `read_config`, when the caller has it.
+        """
+        config = self.read_config() if config is None else config
+        url = config.get("proxy_url") or ""
+        user = config.get("proxy_user") or ""
+        password = self.read_proxy_password() if url and user else ""
+        return proxy_with_credentials(url, user, password)
 
     def read_client_secret(self, client_id):
         """Return the stored secret of one service account, or None."""

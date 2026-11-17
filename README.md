@@ -235,12 +235,12 @@ The app keeps these entries in the secret store, in the realm `adversarial`:
 
 | Entry | Content |
 | --- | --- |
-| `config` | The API URL and the default client ID. No secret. |
+| `config` | The API URL, the default client ID, the proxy URL and the proxy user. No secret. |
 | `secret_<client ID>` | The client secret of one service account. |
+| `proxy_password` | The password of the proxy user. |
 | `token_<client ID>` | The cached token pair of one service account. |
 
-The setup page reads only `config`, so the client secret never reaches the
-browser.
+The setup page reads only `config`, so no secret reaches the browser.
 
 Only the `admin` and `sc_admin` roles can read or change these entries. To let
 the alerts of another role use the actions, give that role the
@@ -252,7 +252,9 @@ to the `[passwords]` stanza of `metadata/local.meta`. See
 
 1. Open the **Adversarial** app. The setup page is its only page.
 2. Type the API base URL, the client ID and the client secret.
-3. Select **Save**.
+3. If the Splunk server must use a proxy, type the proxy settings. See
+   [Proxy](#proxy).
+4. Select **Save**.
 
 A save marks the app as configured (`is_configured = 1` in `local/app.conf`).
 The command line does the same. Until then, a user who opens the app sees the
@@ -301,6 +303,38 @@ alert in plain text, so an alert never holds a secret. An alert that names a
 client ID with no stored secret stops with exit code 2. To check that account,
 run `--verify --client-id arm_sa_...`. To remove it, run
 `--remove-client arm_sa_...`.
+
+<a id="proxy"></a>
+**Proxy**
+
+If the Splunk server reaches the internet only through an HTTP proxy, store
+the proxy in the app. All the requests to the Adversarial API go through it.
+The requests to Splunk on the same server never use the proxy.
+
+| Setting | Value |
+| --- | --- |
+| Proxy URL | `http://` or `https://`, the host and the port, for example `http://proxy.example.com:3128`. No user, password or path. |
+| Proxy user | Optional. The user name for the proxy (HTTP Basic). |
+| Proxy password | The password of the proxy user. Splunk keeps it encrypted, and the setup page never shows it. Leave it empty to keep the stored password. |
+
+For an `https://` API URL, the app opens a `CONNECT` tunnel through the proxy,
+and TLS goes from the Splunk server to the API. To change only the proxy from
+the command line:
+
+    $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py \
+        --proxy-url http://proxy.example.com:3128 \
+        --proxy-user splunk --proxy-password ...
+
+To remove the proxy, use `--no-proxy`. `--show` prints the proxy and the user,
+and `--verify` sends its requests through the proxy.
+
+With no proxy in the app, the app uses the `HTTPS_PROXY` and `NO_PROXY`
+environment variables of Splunk, if `splunk-launch.conf` sets them.
+
+If the proxy inspects TLS, the Splunk server must trust the certificate
+authority of the proxy. Add `SSL_CERT_FILE=<path to a PEM bundle>` to
+`$SPLUNK_HOME/etc/splunk-launch.conf`, then restart Splunk. The bundle must
+hold the public certificate authorities too.
 
 ## Add an alert action to an alert
 
@@ -495,7 +529,7 @@ actions use the same codes.
 | 2 | A setting is missing or not valid. |
 | 3 | The API refused the credentials, or the address of the Splunk server is outside the IP allowlist. |
 | 4 | The API refused the record. |
-| 5 | The Splunk server cannot reach the API. |
+| 5 | The Splunk server cannot reach the API, or the proxy refused the request. |
 | 6 | An unexpected error occurred. |
 | 7 | The service account lacks a permission, or the API refused a cached token from an address outside the IP allowlist. |
 
@@ -524,7 +558,8 @@ Splunk stops an alert action after `maxtime` (default 5 minutes). See
 | Exit code 2 and "no client secret" | The alert sets `param.client_id` to an account with no stored secret. Run `configure_credentials.py --add-client`. |
 | Exit code 3 | The token endpoint refused the client ID or the secret. Check that both are correct, that the service account is not disabled or expired, and that the IP allowlist holds the address of the Splunk server. The API gives the same answer for each cause. |
 | Exit code 4 | Check the source name and the tags. Both must exist in your organization. The risk sources and the incident sources are two separate lists. If the log says that the API limited the request rate, lower the maximum records or make the search return fewer rows. |
-| Exit code 5 | Check that the Splunk server can reach the API URL. |
+| Exit code 5 | Check that the Splunk server can reach the API URL. If the server uses a proxy, store it in the app. See [Proxy](#proxy). |
+| Exit code 5 and "The proxy refused" | Check the proxy URL, the proxy user and the proxy password. The proxy must allow `CONNECT` to port 443 of the API host. |
 | Exit code 7 | The token is valid, but the account may not do the request. Give it the role for the record type, and `tags:read` if the alert sets tags. If the service account has an IP allowlist, add the address of the Splunk server. Run `--verify --require ...` to see what is missing. |
 
 ## Files

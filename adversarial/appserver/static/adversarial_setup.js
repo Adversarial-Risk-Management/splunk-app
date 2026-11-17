@@ -5,6 +5,7 @@
  *   config               JSON with the API URL and the default client ID
  *   secret_<client ID>   the client secret of that service account
  *   token_<client ID>    the cached token pair, removed when the secret changes
+ *   proxy_password       the password of the proxy user
  * Splunk encrypts each value on disk. The page reads only `config`, so the
  * client secret never travels to the browser.
  *
@@ -103,6 +104,8 @@
             }
             element('adversarial-base-url').value = stored.base_url || '';
             element('adversarial-client-id').value = stored.client_id || '';
+            element('adversarial-proxy-url').value = stored.proxy_url || '';
+            element('adversarial-proxy-user').value = stored.proxy_user || '';
             setStatus('ok', 'The app is set up. Client ID: ' + (stored.client_id || 'unknown') +
                 '. Leave the secret empty to keep the stored secret.');
         }).catch(function (error) {
@@ -139,6 +142,9 @@
         var baseUrl = element('adversarial-base-url').value.trim();
         var clientId = element('adversarial-client-id').value.trim();
         var clientSecret = element('adversarial-client-secret').value.trim();
+        var proxyUrl = element('adversarial-proxy-url').value.trim();
+        var proxyUser = proxyUrl ? element('adversarial-proxy-user').value.trim() : '';
+        var proxyPassword = element('adversarial-proxy-password').value;
 
         if (!baseUrl || !clientId) {
             setStatus('error', 'Enter the API URL and the client ID.');
@@ -151,6 +157,18 @@
 
         if (!/^[A-Za-z0-9_]+$/.test(clientId)) {
             setStatus('error', 'The client ID holds only letters, digits and underscores.');
+            return;
+        }
+
+        /* The proxy password stays apart from the URL, in the secret store. */
+        if (proxyUrl && !/^https?:\/\/[^\/\s@:]+(:\d{1,5})?\/?$/.test(proxyUrl)) {
+            setStatus('error', 'The proxy URL must look like http://proxy.example.com:3128, ' +
+                'with no user name, password or path in it.');
+            return;
+        }
+        /* An empty password box keeps the stored password of the same user. */
+        if (proxyUser && !proxyPassword && proxyUser !== stored.proxy_user) {
+            setStatus('error', 'Enter the password of the proxy user ' + proxyUser + '.');
             return;
         }
 
@@ -176,16 +194,31 @@
                 return deleteSecret('token_' + clientId);
             });
         }
+        if (proxyUser && proxyPassword) {
+            steps = steps.then(function () {
+                return writeSecret('proxy_password', proxyPassword);
+            });
+        }
+        var config = { base_url: baseUrl, client_id: clientId };
+        if (proxyUrl) {
+            config.proxy_url = proxyUrl;
+            if (proxyUser) { config.proxy_user = proxyUser; }
+        }
         steps.then(function () {
-            return writeSecret('config', JSON.stringify({ base_url: baseUrl, client_id: clientId }));
+            return writeSecret('config', JSON.stringify(config));
+        }).then(function () {
+            /* No proxy user means no proxy password. */
+            return proxyUser ? null : deleteSecret('proxy_password');
         }).then(function () {
             /* Splunk stops opening this page when a user opens the app. */
             return request('POST', APP_PATH, { configured: '1' }).then(function (result) {
                 return result.ok ? result : Promise.reject(result.text);
             });
         }).then(function () {
-            stored = { base_url: baseUrl, client_id: clientId };
+            stored = config;
             element('adversarial-client-secret').value = '';
+            element('adversarial-proxy-password').value = '';
+            element('adversarial-proxy-user').value = proxyUser;
             setStatus('ok', 'The settings are saved. Splunk keeps the secret encrypted.');
         }).catch(function (error) {
             setStatus('error', 'Could not save the settings: ' + error);

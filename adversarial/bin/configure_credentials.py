@@ -21,6 +21,14 @@ its `param.client_id` names that client ID:
     $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py \\
         --add-client --client-id arm_sa_... --client-secret arm_sk_...
 
+Send the requests to the API through an HTTP proxy. The proxy user and
+password are optional. Give only the proxy options to change only the proxy,
+and `--no-proxy` to remove it:
+
+    $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py \\
+        --proxy-url http://proxy.example.com:3128 \\
+        --proxy-user splunk --proxy-password ...
+
 Show the stored settings. The script never prints a secret:
 
     $SPLUNK_HOME/bin/splunk cmd python3 configure_credentials.py --show
@@ -43,7 +51,7 @@ import getpass
 import os
 import sys
 
-from adversarial_api import AdversarialClient, ApiError, TransportError
+from adversarial_api import AdversarialClient, ApiError, TransportError, check_proxy_url
 from splunk_rest import SplunkRest, SplunkRestError
 
 DEFAULT_MANAGEMENT_URI = "https://localhost:8089"
@@ -67,6 +75,16 @@ def parse_arguments(argv):
                         help="Service account client ID (arm_sa_...)")
     parser.add_argument("--client-secret", default=os.environ.get("ADVERSARIAL_CLIENT_SECRET"),
                         help="Service account client secret (arm_sk_...)")
+    parser.add_argument("--proxy-url", default=os.environ.get("ADVERSARIAL_PROXY_URL"),
+                        help="HTTP proxy for the API requests, for example "
+                             "http://proxy.example.com:3128")
+    parser.add_argument("--proxy-user", default=os.environ.get("ADVERSARIAL_PROXY_USER"),
+                        help="User name for the proxy, if the proxy needs one")
+    parser.add_argument("--proxy-password",
+                        default=os.environ.get("ADVERSARIAL_PROXY_PASSWORD"),
+                        help="Password of the proxy user")
+    parser.add_argument("--no-proxy", action="store_true",
+                        help="Remove the stored proxy, so the requests go directly to the API.")
     parser.add_argument("--management-uri", default=DEFAULT_MANAGEMENT_URI,
                         help="Splunk management URI (default: %s)" % DEFAULT_MANAGEMENT_URI)
     parser.add_argument("--splunk-user", default=os.environ.get("SPLUNK_USERNAME", "admin"))
@@ -118,6 +136,10 @@ def show(rest):
     stored = rest.stored_client_ids()
     print("base_url:        %s" % config.get("base_url"))
     print("default client:  %s" % default)
+    print("proxy:           %s" % (config.get("proxy_url") or "(none)"))
+    if config.get("proxy_url") and config.get("proxy_user"):
+        password = "stored" if rest.read_proxy_password() else "MISSING"
+        print("proxy user:      %s (password %s)" % (config["proxy_user"], password))
     print("stored secrets:  %s" % (", ".join(stored) or "(none)"))
     if default and default not in stored:
         print("warning:         the default client has no stored secret.")
@@ -138,9 +160,13 @@ def verify(rest, options):
         print("The app is not set up. Missing: %s" % ", ".join(missing), file=sys.stderr)
         return 1
 
+    proxy = rest.proxy(config)
+    if config.get("proxy_url"):
+        print("Proxy: %s" % config["proxy_url"])
     client = AdversarialClient(
         base_url, client_id, secret,
         log=lambda level, message: print("%s %s" % (level, message)),
+        proxy=proxy or None,
     )
     try:
         token = client.access_token(force_new=True)
@@ -194,8 +220,57 @@ def report_permissions(granted, required=()):
     return 0
 
 
+def proxy_settings(options, config):
+    """Return (proxy_url, proxy_user, problem) from the options and the config.
+
+    A missing option keeps the stored value. `--no-proxy` removes the proxy.
+    """
+    if options.no_proxy:
+        return "", "", None
+    url = config.get("proxy_url", "") if options.proxy_url is None else options.proxy_url.strip()
+    user = config.get("proxy_user", "") if options.proxy_user is None else options.proxy_user.strip()
+    problem = check_proxy_url(url) if url else None
+    return url, user, problem
+
+
+def store_proxy(rest, options, base_url, client_id, config):
+    """Write the config with the proxy settings. Returns an exit code."""
+    url, user, problem = proxy_settings(options, config)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 2
+    if url and user and options.proxy_password is None and not rest.read_proxy_password():
+        print("Give --proxy-password for the proxy user %s." % user, file=sys.stderr)
+        return 2
+    if url and user and options.proxy_password is not None:
+        rest.write_proxy_password(options.proxy_password)
+    rest.write_config(base_url, client_id, url, user)
+    if url:
+        print("The requests go through the proxy %s." % url)
+    return 0
+
+
 def store(rest, options):
-    """Store the default settings or, with --add-client, one more secret."""
+    """Store the default settings or, with --add-client, one more secret.
+
+    Only proxy options change only the proxy, and keep the other settings.
+    """
+    proxy_only = (
+        not options.add_client
+        and not (options.base_url or options.client_id or options.client_secret)
+        and (options.no_proxy or options.proxy_url is not None or options.proxy_user is not None
+             or options.proxy_password is not None)
+    )
+    if proxy_only:
+        config = rest.read_config()
+        if not config:
+            print("Store the API settings before the proxy.", file=sys.stderr)
+            return 2
+        code = store_proxy(rest, options, config["base_url"], config["client_id"], config)
+        if code == 0 and options.no_proxy:
+            print("The requests go directly to the API.")
+        return code
+
     needed = [("--client-id", options.client_id), ("--client-secret", options.client_secret)]
     if not options.add_client:
         needed.insert(0, ("--base-url", options.base_url))
@@ -209,7 +284,9 @@ def store(rest, options):
         print("The secret of %s is stored. An alert uses it when param.client_id names it."
               % options.client_id)
         return 0
-    rest.write_config(options.base_url, options.client_id)
+    code = store_proxy(rest, options, options.base_url, options.client_id, rest.read_config())
+    if code:
+        return code
     rest.mark_configured()
     print("The settings are stored. Default client ID: %s" % options.client_id)
     return 0
